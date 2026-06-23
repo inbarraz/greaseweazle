@@ -22,6 +22,11 @@ from typing import List, Tuple
 # actually wired to it.
 DENSITY_SELECT_PIN = 2
 
+# Matches the threshold already hardcoded in tools/read.py, write.py and
+# align.py's --gen-tg43 option: pin 2 driven high below this cylinder, low
+# from it upward.
+TG43_TRACK_THRESHOLD = 60
+
 # Input signals polled once per tick, in status-line display order.
 # (label, pin, ambiguous)
 #

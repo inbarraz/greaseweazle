@@ -96,18 +96,17 @@ def try_seek(usb: USB.Unit, st: State, new_cyl: int) -> None:
         st.cyl = new_cyl
     except (error.Fatal, USB.CmdError) as e:
         print(str(e))
+        return
+    if st.args.gen_tg43:
+        st.density = st.cyl < pinmap.TG43_TRACK_THRESHOLD
+        usb.set_pin(pinmap.DENSITY_SELECT_PIN, st.density)
 
 
 def recalibrate(usb: USB.Unit, st: State) -> None:
     print('Recalibrating to track 0')
     prior = st.cyl
-    try:
-        usb.seek(0, st.head)
-        st.cyl = 0
-        usb.seek(prior, st.head)
-        st.cyl = prior
-    except (error.Fatal, USB.CmdError) as e:
-        print(str(e))
+    try_seek(usb, st, 0)
+    try_seek(usb, st, prior)
 
 
 def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
@@ -130,8 +129,9 @@ def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
         st.motor = not st.motor
         usb.drive_motor(st.args.drive.unit_id, st.motor)
     elif key == 'd':
-        st.density = not st.density
-        usb.set_pin(pinmap.DENSITY_SELECT_PIN, st.density)
+        if not st.args.gen_tg43:  # pin 2 is auto-tracked, 'd' is a no-op
+            st.density = not st.density
+            usb.set_pin(pinmap.DENSITY_SELECT_PIN, st.density)
     return True
 
 
@@ -213,6 +213,9 @@ def run(usb: USB.Unit, args) -> None:
     st = State(args)
     print(cheatsheet())
     print(KEYLEGEND)
+    if args.gen_tg43:
+        print('TG43 auto-tracking enabled on pin 2 (threshold T%d); '
+              'the d key is disabled' % pinmap.TG43_TRACK_THRESHOLD)
     try_seek(usb, st, 0)  # known starting position for the session
 
     next_tick = time.monotonic()
@@ -251,6 +254,12 @@ def main(argv) -> None:
     parser.add_argument("--rpm", type=float, default=None,
                         help="fixed spindle speed, in rpm "
                         "(omit to track the live measurement)")
+    parser.add_argument("--gen-tg43", action="store_true",
+                        help="auto-drive pin 2 as a TG43 signal for "
+                        "8-inch drives (low from T%d up, high below), "
+                        "matching --gen-tg43 in read/write/align. "
+                        "Disables the d key, since pin 2 is then "
+                        "under automatic control" % pinmap.TG43_TRACK_THRESHOLD)
     parser.description = description
     parser.prog += ' ' + argv[1]
     args = parser.parse_args(argv[2:])
