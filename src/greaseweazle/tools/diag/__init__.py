@@ -10,7 +10,7 @@
 description = "Interactive live disk/drive diagnostic."
 
 import os, sys, time
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
@@ -163,7 +163,8 @@ def status_line(usb: USB.Unit, st: State) -> str:
         # This interface is active-low: WP asserted (L) == write-protected.
         wp_str += ' Unprot' if wp_level else ' Prot'
 
-    rpm_str, rpm_val, sect, off_track = 'off', None, 0, 0
+    rpm_str, rpm_val, sect = 'off', None, 0
+    off_track: List[Tuple[int, int]] = []
     if st.motor:
         # Bound the capture by *time*, not by index pulses: with no disk
         # inserted there is never an index pulse, so usb.read_track(revs=N)
@@ -188,15 +189,18 @@ def status_line(usb: USB.Unit, st: State) -> str:
             # No disk / no index found, or garbage flux -- never let this
             # kill the session, just report nothing decoded this tick.
             rpm_str = 'ERR'
-            sect, off_track = 0, 0
+            sect, off_track = 0, []
+
+    ot_str = ('NO' if not off_track else
+             ','.join('T%d/S%d' % (c, n) for c, n in off_track))
 
     secs = args.secs if args.secs is not None else guess_secs(args.rate, rpm_val)
     secs_str = str(secs) if secs is not None else '?'
 
-    return ('Drive %s, RPM %s, Kbps %d, T%d, H%d, S%d/%s, OT%d, '
+    return ('Drive %s, RPM %s, Kbps %d, T%d, H%d, S%d/%s, OT %s, '
             'WP %s, DC %s, TK0 %s, Density %d:%s' %
             (drive_label(args.drive), rpm_str, args.rate, st.cyl, st.head,
-             sect, secs_str, off_track, wp_str, sigs['DC'], sigs['TK0'],
+             sect, secs_str, ot_str, wp_str, sigs['DC'], sigs['TK0'],
              pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L'))
 
 
