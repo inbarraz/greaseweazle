@@ -11,6 +11,15 @@ from typing import List, Tuple
 
 # Density-select is an output we drive ourselves (no read-back pin exists
 # in this firmware), so it's tracked in software rather than polled here.
+#
+# Pin 2 isn't always density-select: on 8-inch drives (and on 34-to-50-pin
+# adapter cables, which almost always carry it through) the same pin is
+# often wired as TG43 instead, asserted past a given cylinder to enable
+# write precompensation. See the existing --gen-tg43 option in tools/read.py,
+# write.py and align.py for the convention this codebase already follows
+# (asserted from track 60 up). The 'd' key here just toggles the raw pin;
+# what that means electrically depends on which signal your cable/drive
+# actually wired to it.
 DENSITY_SELECT_PIN = 2
 
 # Input signals polled once per tick, in status-line display order.
