@@ -71,24 +71,21 @@ Contributions to port it are welcome (see
 
 Pick whichever matches what you have installed.
 
-**Option A, run from source (no compiler needed).** The speed-up extension
-is optional at runtime, so you can skip building it and run the pure-Python
-code directly. Requires only
-[Python 3.8 or newer](https://www.python.org/downloads/windows/):
+**Option A, run from source with `gw-diag.bat` (no compiler needed).** The
+speed-up extension is optional at runtime, so you can skip building it and
+run the pure-Python code directly. The included `gw-diag.bat` launcher does
+the setup for you: it writes the version stub, sets the environment, and
+installs the four runtime packages on first run. Requires only
+[Python 3.8 or newer](https://www.python.org/downloads/windows/) on your PATH:
 
 ```
 git clone -b diag https://github.com/misterblack1/greaseweazle.git
 cd greaseweazle
-pip install crcmod "bitarray>=3" pyserial requests
-python -c "open('src/greaseweazle/__init__.py','w').write(\"__version__='0.0.local'\n\")"
-set GW_OPT=n
-set PYTHONPATH=src
-python scripts\win\gw.py diag --rate 500
+gw-diag.bat --rate 500
 ```
 
-The three `set`/`python` lines must run in the same Command Prompt window;
-open a fresh one and re-run the two `set` lines (plus the launcher) for each
-later session, or save them into a small `.cmd` file.
+Run `gw-diag.bat` on its own (no arguments) for full help on every option
+and the meaning of each field in the output line.
 
 **Option B, install with pipx (needs a C compiler).** Requires
 [Python 3.8 or newer](https://www.python.org/downloads/windows/) and the
