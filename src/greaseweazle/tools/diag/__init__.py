@@ -2,7 +2,7 @@
 #
 # Greaseweazle control script: Interactive live disk/drive diagnostic.
 #
-# Written & released by Keir Fraser <keir.xen@gmail.com>
+# Based on the work of Keir Fraser
 #
 # This is free and unencumbered software released into the public domain.
 # See the file COPYING for more details, or visit <http://unlicense.org>.

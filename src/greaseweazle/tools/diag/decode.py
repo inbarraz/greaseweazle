@@ -4,7 +4,7 @@
 # IDAM cylinder matches the head's current (expected) cylinder versus
 # sectors that decoded cleanly but came from a different cylinder.
 #
-# Written & released by Keir Fraser <keir.xen@gmail.com>
+# Based on the work of Keir Fraser
 #
 # This is free and unencumbered software released into the public domain.
 # See the file COPYING for more details, or visit <http://unlicense.org>.
