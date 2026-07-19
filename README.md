@@ -38,6 +38,42 @@ Interactive keys: number keys jump to a track, `+` / `-` / arrow keys step a
 single track, `r` recalibrates, `h` toggles head, `m` toggles the motor,
 `d` toggles density-select, and `q` / `Esc` quits.
 
+![gw diag printing a live status line per read, all sectors decoding cleanly](screenshots/gw-diag.png)
+
+*Reading track 0 of a 5.25-inch 360K disk at 250 kbps. All nine sectors
+decode cleanly (`S9/9`) with no off-track sectors (`OT NO`), and the spindle
+holds a steady ~297 rpm: a healthy drive reading a healthy disk.*
+
+### Reading the live status line
+
+Each line is one fresh read of the track currently under the head, printed a
+few times a second. Using the example from the screenshot above:
+
+```
+Drive A, RPM 297.30, Kbps 250, T0, H0, S9/9, OT NO, WP 28:H Unprot, DC 34:?, TK0 26:L, Density 2:L
+```
+
+| Field | Meaning |
+|-------|---------|
+| `Drive A` | The drive being read (set with `--drive`). |
+| `RPM 297.30` | Measured spindle speed. Shows `ERR` when no disk or index pulse is seen, or `off` when you stop the motor with the `m` key. |
+| `Kbps 250` | The data rate you set with `--rate`. |
+| `T0` | Current track (cylinder) under the head. |
+| `H0` | Current head/side. |
+| `S9/9` | Sectors read cleanly out of the number expected. `9/9` means every sector decoded; `S7/9` would mean two were missing or unreadable. |
+| `OT NO` | Off-track sectors. `NO` means none. Otherwise it lists which track the stray sectors claim to come from, as `T<cyl>/S<count>` (for example `T11/S2`), which points to the head mistracking or stepping to the wrong place. |
+| `WP 28:H Unprot` | Write-protect line on 34-pin connector pin 28: the raw level (`H` or `L`) and what it means on this drive (`Prot` or `Unprot`). |
+| `DC 34:?` | Disk-change/ready line on pin 34. `?` means your Greaseweazle cannot read this pin back. |
+| `TK0 26:L` | Track-0 sensor on pin 26. `L` here means the head is at track 0; it reads `H` once stepped off track 0. |
+| `Density 2:L` | Density-select output on pin 2 and the level you have set with the `d` key. On some dual-speed drives toggling `d` also changes the spindle speed: many 1.2MB 5.25-inch drives switch between 360 and 300 rpm with this pin, which you will see reflected live in the `RPM` field. Note too that on many 8-inch drives and 34-to-50-pin adapter cables pin 2 is wired as TG43 rather than density select; see `--gen-tg43`. |
+
+For a meaningful test, put a **known-good, standard IBM PC MFM formatted
+floppy** in the drive, ideally one written on a drive known to be in good
+order. A clean full-count read (here `S9/9`) with `OT NO` is then unambiguous
+confirmation that the drive under test is reading correctly, and anything
+worse points at the drive or disk you are checking rather than at the
+reference disk.
+
 ### Usage
 
 ```
