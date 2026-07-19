@@ -1,15 +1,5 @@
 # Greaseweazle Host Tools: Diagnostic Edition
 
-*Tools for accessing a floppy drive at the raw flux level.*
-
-![CI Badge][ci-badge]
-![Downloads Badge][downloads-badge]
-![Version Badge][version-badge]
-
-<img src="https://raw.githubusercontent.com/wiki/keirf/greaseweazle/assets/banner2.jpg">
-
----
-
 ## About this fork: the `gw diag` command
 
 This is a fork of [keirf/greaseweazle][upstream] that adds **one new command,
@@ -23,7 +13,7 @@ unchanged from upstream, and the change is self-contained (a new
 Where `gw read` takes a single pass and exits, `gw diag` keeps the spindle
 spinning and lets you drive the head interactively while it continuously
 decodes the track currently under the head. It is built for diagnosing
-drives, checking head alignment, and identifying unknown disks at the bench.
+drives: RPM, head movement, head alignment, etc.
 For the current track it reports:
 
 * **On-track vs off-track sector counts**, decoded live from the flux with
@@ -60,7 +50,7 @@ Drive A, RPM 297.30, Kbps 250, T0, H0, S9/9, OT NO, WP 28:H Unprot, DC 34:?, TK0
 | `Kbps 250` | The data rate you set with `--rate`. |
 | `T0` | Current track (cylinder) under the head. |
 | `H0` | Current head/side. |
-| `S9/9` | Sectors read cleanly out of the number expected. `9/9` means every sector decoded; `S7/9` would mean two were missing or unreadable. |
+| `SX/X` | Sectors read cleanly out of the number expected. `9/9` means every sector decoded; `S7/9` would mean two were missing or unreadable. The total sector count will vary depending on the type of disk being read. |
 | `OT NO` | Off-track sectors. `NO` means none. Otherwise it lists which track the stray sectors claim to come from, as `T<cyl>/S<count>` (for example `T11/S2`), which points to the head mistracking or stepping to the wrong place. |
 | `WP 28:H Unprot` | Write-protect line on 34-pin connector pin 28: the raw level (`H` or `L`) and what it means on this drive (`Prot` or `Unprot`). |
 | `DC 34:?` | Disk-change/ready line on pin 34. `?` means your Greaseweazle cannot read this pin back. |
@@ -149,6 +139,16 @@ pipx install git+https://github.com/misterblack1/greaseweazle@diag
 it is released into the public domain. See [COPYING](COPYING).
 
 [upstream]: https://github.com/keirf/greaseweazle
+
+---
+
+*Tools for accessing a floppy drive at the raw flux level.*
+
+![CI Badge][ci-badge]
+![Downloads Badge][downloads-badge]
+![Version Badge][version-badge]
+
+<img src="https://raw.githubusercontent.com/wiki/keirf/greaseweazle/assets/banner2.jpg">
 
 ---
 
