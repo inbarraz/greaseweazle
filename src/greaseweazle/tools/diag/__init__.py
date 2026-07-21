@@ -85,6 +85,17 @@ def read_key() -> Optional[str]:
         return None
 
 
+def sync_density_pin(usb: USB.Unit, st: State) -> None:
+    # Pin 2 is an output we drive ourselves -- there's no hardware
+    # read-back for it (see pinmap.py), so we can't just trust that
+    # whatever level the firmware defaults to after a reset matches
+    # st.density. Force a real transition (away, then back) so the GW is
+    # actually driving the level the status line claims, rather than a
+    # same-value set_pin() silently being a no-op against a stale register.
+    usb.set_pin(pinmap.DENSITY_SELECT_PIN, not st.density)
+    usb.set_pin(pinmap.DENSITY_SELECT_PIN, st.density)
+
+
 def try_seek(usb: USB.Unit, st: State, new_cyl: int) -> None:
     # No upper clamp -- the user can deliberately probe past the declared
     # --cyls (e.g. to find a drive's real mechanical limit); usb.seek()
@@ -102,11 +113,56 @@ def try_seek(usb: USB.Unit, st: State, new_cyl: int) -> None:
         usb.set_pin(pinmap.DENSITY_SELECT_PIN, st.density)
 
 
+# Cap on recalibration steps -- more cylinders than any real drive has, so
+# a genuinely stuck head or dead TK0 sensor is reported instead of looping
+# forever.
+MAX_RECAL_STEPS = 80
+
+
 def recalibrate(usb: USB.Unit, st: State) -> None:
     print('Recalibrating to track 0')
     prior = st.cyl
-    try_seek(usb, st, 0)
-    try_seek(usb, st, prior)
+
+    # A previous failed/aborted seek can leave the firmware's internal
+    # cylinder counter out of sync with the real head position, so a plain
+    # seek(0) computes a zero (or wrong) step delta and never physically
+    # moves the head -- this is exactly the state "gw reset" has always
+    # been observed to clear. power_on_reset() (Cmd.Reset) wipes that
+    # internal state, so redo the per-session setup it also resets.
+    try:
+        usb.power_on_reset()
+        usb.set_bus_type(st.args.drive.bus.value)
+        usb.drive_select(st.args.drive.unit_id)
+        usb.drive_motor(st.args.drive.unit_id, st.motor)
+        sync_density_pin(usb, st)
+    except USB.CmdError as e:
+        print('Recalibration reset failed: %s' % e)
+        return
+
+    for cyl in range(0, -MAX_RECAL_STEPS, -1):
+        # Negative cylinders bypass usb.seek()'s own TRK0 check (it only
+        # validates when target==0), so this always "succeeds" while still
+        # physically stepping the head one track further each time -- a
+        # fallback in case the reset alone doesn't fully re-home the head.
+        try:
+            usb.seek(cyl, st.head)
+        except (error.Fatal, USB.CmdError):
+            pass
+        try:
+            trk0 = not usb.get_pin(pinmap.TK0_PIN)
+        except USB.CmdError:
+            trk0 = False
+        if trk0:
+            st.cyl = 0
+            try_seek(usb, st, prior)
+            return
+    print('Track 0 signal never asserted after %d steps -- '
+          'bad TK0 sensor or heads stuck?' % MAX_RECAL_STEPS)
+    # prior is very likely 0 here (that's the common way this loop gets
+    # triggered) -- don't re-run the same failing seek(0) and dump the raw
+    # firmware error a second time right after our own diagnostic.
+    if prior != 0:
+        try_seek(usb, st, prior)
 
 
 def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
@@ -216,7 +272,8 @@ def run(usb: USB.Unit, args) -> None:
     if args.gen_tg43:
         print('TG43 auto-tracking enabled on pin 2 (threshold T%d); '
               'the d key is disabled' % pinmap.TG43_TRACK_THRESHOLD)
-    try_seek(usb, st, 0)  # known starting position for the session
+    sync_density_pin(usb, st)  # make sure GW is really driving what we assume
+    recalibrate(usb, st)  # known starting position for the session
 
     next_tick = time.monotonic()
     while True:

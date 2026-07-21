@@ -35,8 +35,10 @@ TG43_TRACK_THRESHOLD = 60
 # Pin 34's *meaning* does vary by drive family (Disk-Change on IBM/PC,
 # often Ready on Shugart, remapped further on some drives e.g. Amiga) --
 # hence 'ambiguous': show the raw level, not an asserted semantic.
+TK0_PIN = 26
+
 SIGNALS: List[Tuple[str, int, bool]] = [
     ('WP',  28, False),
     ('DC',  34, True),
-    ('TK0', 26, False),
+    ('TK0', TK0_PIN, False),
 ]
