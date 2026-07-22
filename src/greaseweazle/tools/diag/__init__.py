@@ -51,7 +51,7 @@ def enable_vt_colours() -> None:
 
 KEYLEGEND = """\
 Keys: 0-9=goto track N0  +/-/<-/->=step 1  r=recalibrate
-      h=head  m=motor  d=density-select  q/Esc=quit"""
+      h=head  m=motor  s=drive-select  d=density-select  q/Esc=quit"""
 
 # (rate_kbps, nominal_rpm) -> (sectors/track, description). Sector count
 # depends on rate *and* rpm together -- e.g. 500kbps is 15 sec/trk at
@@ -96,6 +96,7 @@ class State:
         self.cyl = 0
         self.head = 0
         self.motor = True
+        self.selected = True  # util.with_drive_selected() selects before run()
         self.density = False
         self.last_rpm: Optional[float] = None  # self-corrects the read window
 
@@ -170,7 +171,12 @@ def recalibrate(usb: USB.Unit, st: State) -> None:
         st.delays.update()  # power_on_reset() wipes step/settle/etc back to
                             # firmware defaults -- restore the session's delays
         usb.set_bus_type(st.args.drive.bus.value)
-        usb.drive_select(st.args.drive.unit_id)
+        # Respect a manual 's' deselect -- don't silently re-select just
+        # because the reset forces the bus type to be reasserted.
+        if st.selected:
+            usb.drive_select(st.args.drive.unit_id)
+        else:
+            usb.drive_deselect()
         usb.drive_motor(st.args.drive.unit_id, st.motor)
         sync_density_pin(usb, st)
     except USB.CmdError as e:
@@ -227,6 +233,16 @@ def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
     elif key == 'm':
         st.motor = not st.motor
         usb.drive_motor(st.args.drive.unit_id, st.motor)
+    elif key == 's':
+        # Deliberately independent of the motor: some drives gate their
+        # head load/unload solenoid off drive-select rather than motor-on,
+        # so this lets that be tested on its own, with the motor left
+        # running (or not) either way.
+        st.selected = not st.selected
+        if st.selected:
+            usb.drive_select(st.args.drive.unit_id)
+        else:
+            usb.drive_deselect()
     elif key == 'd':
         if not st.args.gen_tg43:  # pin 2 is auto-tracked, 'd' is a no-op
             st.density = not st.density
@@ -305,9 +321,10 @@ def status_line(usb: USB.Unit, st: State) -> str:
         colour = _GREEN if sect == secs else _RED
         sect_field = '%s%s%s' % (colour, sect_field, _RESET)
 
-    return ('Drive %s, RPM %s, Kbps %d, T%d, H%d, %s, OT %s, '
+    return ('Drive %s, SEL %s, MOT %s, RPM %s, Kbps %d, T%d, H%d, %s, OT %s, '
             'WP %s, DC %s, TK0 %s, Density %d:%s' %
-            (drive_label(args.drive), rpm_str, args.rate, st.cyl, st.head,
+            (drive_label(args.drive), 'H' if st.selected else 'L',
+             'H' if st.motor else 'L', rpm_str, args.rate, st.cyl, st.head,
              sect_field, ot_str, wp_str, sigs['DC'], sigs['TK0'],
              pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L'))
 

@@ -143,10 +143,17 @@ echo                     the d key while active, since pin 2 is then
 echo                     under automatic control, not manual toggle.
 echo.
 echo OUTPUT LINE FORMAT:
-echo   Drive A, RPM 297.53, Kbps 250, T0, H0, S9/9, OT NO, WP 28:H Unprot,
-echo   DC 34:?, TK0 26:L, Density 2:L
+echo   Drive A, SEL H, MOT H, RPM 297.53, Kbps 250, T0, H0, S9/9, OT NO,
+echo   WP 28:H Unprot, DC 34:?, TK0 26:L, Density 2:L
 echo.
 echo   Drive       Drive ID you selected.
+echo   SEL         Drive-select line: H while selected, L after the s key
+echo               deselects it. Independent of MOT -- some drives gate
+echo               their head load/unload solenoid off drive-select
+echo               rather than motor-on, so this lets you test that
+echo               without also stopping the spindle.
+echo   MOT         Motor-on line: H while the motor is running, L after
+echo               the m key turns it off.
 echo   RPM         Measured spindle speed this update. Shows ERR if no
 echo               disk or index signal was found, or "off" if you turned
 echo               the motor off with the m key.
@@ -181,6 +188,6 @@ echo               way; use --gen-tg43 instead if you want it driven
 echo               automatically by cylinder rather than by hand.
 echo.
 echo The tool itself prints a key legend when it starts (step, jump, head,
-echo recalibrate, motor, density, quit).
+echo recalibrate, motor, drive-select, density, quit).
 echo.
 exit /b 1
