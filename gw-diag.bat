@@ -37,8 +37,9 @@ if errorlevel 1 exit /b 1
 rem src\greaseweazle\__init__.py is gitignored and only gets written by a
 rem real build/version step. "make mypy" overwrites it with a type-stub-only
 rem line that breaks "from greaseweazle import __version__" at runtime, so
-rem always rewrite a working one here before running.
-> "%ROOT%\src\greaseweazle\__init__.py" echo __version__ = '0.1.dev0+local'
+rem always rewrite a working one here before running. No "+" in the string --
+rem cli.py prints a "TEST/PRE-RELEASE" banner whenever one is present.
+> "%ROOT%\src\greaseweazle\__init__.py" echo __version__ = '0.1.dev0local'
 
 set "PYTHONPATH=%ROOT%\src"
 set "GW_OPT=n"
