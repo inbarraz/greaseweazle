@@ -1,14 +1,26 @@
 @echo off
 setlocal
 
-if "%~1"=="" goto :usage
-if /I "%~1"=="/?" goto :usage
-if /I "%~1"=="/h" goto :usage
-
 rem This batch file lives in the root of the greaseweazle fork and runs the
 rem gw diag tool straight from the source tree next to it.
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+rem Always show which commit this copy is at, first thing, before anything
+rem else can go wrong or print help and exit -- so a copied/synced tree
+rem never leaves you guessing which version you're actually running.
+where git >nul 2>nul
+if not errorlevel 1 (
+    for /f "delims=" %%v in ('git -C "%ROOT%" log -1 --format^="%%h %%ci %%s" 2^>nul') do echo gw-diag: %%v
+    if errorlevel 1 echo gw-diag: ^(not a git checkout -- can't identify commit^)
+) else (
+    echo gw-diag: ^(git not on PATH -- can't identify commit^)
+)
+
+if "%~1"=="" goto :usage
+if /I "%~1"=="/?" goto :usage
+if /I "%~1"=="/h" goto :usage
+
 if not exist "%ROOT%\scripts\win\gw.py" (
     echo ERROR: gw-diag.bat must sit in the root of the greaseweazle fork,
     echo next to the scripts\ and src\ folders. "%ROOT%\scripts\win\gw.py"
@@ -99,6 +111,13 @@ echo   --cyls N         Number of cylinders the drive has. Default: 84. You
 echo                     can still step past this to probe a drive's real
 echo                     mechanical limit; it's just the default range.
 echo   --heads N        Number of heads/sides: 1 or 2. Default: 2.
+echo   --double-step    Step two physical cylinders per logical track, for
+echo                     an 80-track drive reading a 40-track disk.
+echo   --step-delay N   Step Delay in microseconds for this session only
+echo                     (same units as "gw delays --step"). Optional --
+echo                     without it, diag preserves whatever "gw delays"
+echo                     already has set, instead of reverting to the
+echo                     firmware default the way it used to.
 echo   --encoding TYPE  mfm or fm. Default: mfm. Almost everything from the
 echo                     PC, Amiga and Atari ST era is mfm; old 8-inch or
 echo                     single-density disks are fm.
