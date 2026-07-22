@@ -169,6 +169,11 @@ def recalibrate(usb: USB.Unit, st: State) -> None:
         usb.power_on_reset()
         st.delays.update()  # power_on_reset() wipes step/settle/etc back to
                             # firmware defaults -- restore the session's delays
+        readback = Delays(usb)
+        if readback.step != st.delays.step:
+            print('WARNING: device reports step delay %dus, not the %dus '
+                  'this session is using -- it did not take.' %
+                  (readback.step, st.delays.step))
         usb.set_bus_type(st.args.drive.bus.value)
         usb.drive_select(st.args.drive.unit_id)
         usb.drive_motor(st.args.drive.unit_id, st.motor)
@@ -390,6 +395,16 @@ def main(argv) -> None:
             delays.step = args.step_delay
         usb.power_on_reset()
         delays.update()  # power_on_reset() wiped them -- restore/apply now
+        # Read back from the device rather than trusting our own write --
+        # confirms SetParams actually stuck rather than silently no-op'ing
+        # right after Cmd.Reset.
+        readback = Delays(usb)
+        print('Step Delay: %dus, Settle Time: %dms' %
+              (readback.step, readback.seek_settle))
+        if readback.step != delays.step:
+            print('WARNING: device reports step delay %dus, not the %dus '
+                  'just requested -- it did not take.' %
+                  (readback.step, delays.step))
         util.with_drive_selected(lambda: run(usb, args, delays), usb,
                                  args.drive)
     except USB.CmdError as err:
