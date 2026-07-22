@@ -18,6 +18,7 @@ from greaseweazle import usb as USB
 from greaseweazle.codec import codec  # noqa: F401
 from greaseweazle.codec.ibm.ibm import Mode
 from greaseweazle.tools import util
+from greaseweazle.tools.delays import Delays
 from greaseweazle.tools.diag import pinmap, decode
 
 if os.name == 'nt':
@@ -89,8 +90,9 @@ _ARROW_MAP = {b'H': 'up', b'P': 'down', b'K': 'left', b'M': 'right'}
 
 
 class State:
-    def __init__(self, args) -> None:
+    def __init__(self, args, delays: Delays) -> None:
         self.args = args
+        self.delays = delays
         self.cyl = 0
         self.head = 0
         self.motor = True
@@ -165,6 +167,8 @@ def recalibrate(usb: USB.Unit, st: State) -> None:
     # internal state, so redo the per-session setup it also resets.
     try:
         usb.power_on_reset()
+        st.delays.update()  # power_on_reset() wipes step/settle/etc back to
+                            # firmware defaults -- restore the session's delays
         usb.set_bus_type(st.args.drive.bus.value)
         usb.drive_select(st.args.drive.unit_id)
         usb.drive_motor(st.args.drive.unit_id, st.motor)
@@ -308,14 +312,14 @@ def status_line(usb: USB.Unit, st: State) -> str:
              pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L'))
 
 
-def run(usb: USB.Unit, args) -> None:
+def run(usb: USB.Unit, args, delays: Delays) -> None:
 
     if os.name != 'nt':
         raise error.Fatal(
             'gw diag requires Windows (uses msvcrt for keyboard input)')
 
     enable_vt_colours()
-    st = State(args)
+    st = State(args, delays)
     print(cheatsheet())
     print(KEYLEGEND)
     if args.gen_tg43:
@@ -353,6 +357,12 @@ def main(argv) -> None:
     parser.add_argument("--double-step", action="store_true",
                         help="step two physical cylinders per track, for an "
                         "80-track drive reading a 40-track disk")
+    parser.add_argument("--step-delay", type=util.uint, metavar="N",
+                        help="Step Delay (usecs) for this session, as "
+                        "'gw delays --step' (overrides the persisted "
+                        "setting; otherwise it is preserved across diag's "
+                        "internal resets rather than reverting to the "
+                        "firmware default)")
     parser.add_argument("--encoding", choices=['mfm', 'fm'], default='mfm',
                         help="track encoding")
     parser.add_argument("--rate", type=util.min_int(1), required=True,
@@ -375,8 +385,13 @@ def main(argv) -> None:
 
     try:
         usb = util.usb_open(args.device)
+        delays = Delays(usb)  # capture the persisted "gw delays" settings
+        if args.step_delay is not None:
+            delays.step = args.step_delay
         usb.power_on_reset()
-        util.with_drive_selected(lambda: run(usb, args), usb, args.drive)
+        delays.update()  # power_on_reset() wiped them -- restore/apply now
+        util.with_drive_selected(lambda: run(usb, args, delays), usb,
+                                 args.drive)
     except USB.CmdError as err:
         print("Command Failed: %s" % err)
 
