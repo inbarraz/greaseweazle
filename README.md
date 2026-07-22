@@ -37,13 +37,13 @@ single track, `r` recalibrates, `h` toggles head, `m` toggles the motor,
 gate their head load/unload solenoid off drive-select rather than
 motor-on), `d` toggles density-select, and `q` / `Esc` quits.
 
-![gw diag stepping across a disk, most tracks reading cleanly with two failed reads at track 40](screenshots/gw-diag.png)
+![gw-diag stepping across a disk, most tracks reading cleanly with two failed reads at track 40](screenshots/gw-diag.png)
 
 *Stepping across a double-sided 5.25-inch disk in a 40-track drive at 250 kbps.
 Most tracks read clean (green `S9/9`) with no off-track sectors (`OT NO`),
-track 40 dropped three reads (red `S0/9`) because track 40 is blank,
-and the spindle holds a steady ~297 rpm. `TK0` reads `ON` only at track 0,
-and `r` recalibrates the head back there.*
+while track 40 dropped two reads (red `S0/9`). The spindle holds a steady ~297
+rpm, `TK0` reads `ON` only at track 0, and `r` recalibrates the head back
+there.*
 
 ### Reading the live status line
 
@@ -62,7 +62,7 @@ Drive A: T0, H0, RPM 297.30, S9/9, OT NO, SEL:ON, MOT:ON, WP:H Unprot, TK0:L ON,
 | `RPM 297.30` | Measured spindle speed, colored green within 5rpm of a standard spindle speed (300 or 360rpm) and red otherwise. Shows `ERR` when no disk or index pulse is seen, or `off` when you stop the motor with the `m` key. |
 | `SX/X` | Sectors read cleanly out of the number expected, colored green when complete and red otherwise. `9/9` means every sector decoded. `S7/9` would mean two were missing or unreadable. The total sector count will vary depending on the type of disk being read. |
 | `OT NO` | Off-track sectors. `NO` means none. Otherwise it lists which track the stray sectors claim to come from, as `T<cyl>/S<count>` (for example `T11/S2`), which points to the head mistracking or stepping to the wrong place. |
-| `SEL:ON` | Drive-select line: `ON` while selected, `OFF` after the `s` key deselects it. Independent of `MOT` -- some drives gate their head load/unload solenoid off drive-select rather than motor-on. |
+| `SEL:ON` | Drive-select line: `ON` while selected, `OFF` after the `s` key deselects it. Independent of `MOT`. Some drives gate their head load/unload solenoid off drive-select rather than motor-on. |
 | `MOT:ON` | Motor-on line: `ON` while the motor is running, `OFF` after the `m` key turns it off. |
 | `WP:H Unprot` | Write-protect line (34-pin connector pin 28): the raw level (`H` or `L`) and what it means on this drive (`Prot` or `Unprot`). |
 | `TK0:L ON` | Track-0 sensor (pin 26): the raw level plus `ON`/`OFF` for whether the head is at track 0 (active-low, so `L` is `ON`). |
@@ -99,6 +99,9 @@ Common options:
 
 Run `gw-diag --help` for the full list.
 
+In these examples `gw-diag` is the `gw-diag.bat` launcher from Option A below.
+If you installed with pipx (Option B), the command is `gw diag` with a space.
+
 ### Getting started
 
 `gw-diag` currently runs on **Windows only**: it uses the Windows `msvcrt`
@@ -118,16 +121,18 @@ the setup for you: it writes the version stub, sets the environment, and
 installs the four runtime packages on first run. Requires only
 [Python 3.8 or newer](https://www.python.org/downloads/windows/) on your PATH.
 
-First download the latest release for Greaseweazle from the repo's releases
-section:
+`gw-diag.bat` runs the diagnostic by itself, but you will usually also want
+the standard `gw.exe` tool for reading, writing, and everything else. To get
+both, first download the latest Greaseweazle release:
 
 [https://github.com/keirf/greaseweazle/releases](https://github.com/keirf/greaseweazle/releases)
 
-Unzip the files to a location on your hard drive. Then download this repo
-and copy the files into the directory, overwriting the any files when asked.
+Unzip it to a location on your hard drive, then copy this fork's files into
+that same folder, overwriting any files when asked. You now have `gw.exe` and
+`gw-diag.bat` side by side.
 
-You can also use 'git clone' is available, just make sure to put these files
-on top of the release of Greaseweazle:
+If you only want the diagnostic and have git installed, you can skip the
+release download and clone this fork on its own instead:
 
 ```
 git clone -b diag https://github.com/misterblack1/greaseweazle.git
