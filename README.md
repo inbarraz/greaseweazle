@@ -37,17 +37,17 @@ single track, `r` recalibrates, `h` toggles head, `m` toggles the motor,
 gate their head load/unload solenoid off drive-select rather than
 motor-on), `d` toggles density-select, and `q` / `Esc` quits.
 
-![gw diag printing a live status line per read, all sectors decoding cleanly](screenshots/gw-diag.png)
+![gw diag stepping across a disk, most tracks reading cleanly with two failed reads at track 40](screenshots/gw-diag.png)
 
-*Reading track 0 of a 5.25-inch 360K disk at 250 kbps. All nine sectors
-decode cleanly (`S9/9`) with no off-track sectors (`OT NO`), and the spindle
-holds a steady ~297 rpm: a healthy drive reading a healthy disk.*
+*Stepping across a single-sided 5.25-inch disk at 250 kbps. Most tracks read
+clean (green `S9/9`) with no off-track sectors (`OT NO`), track 40 dropped two
+reads (red `S0/9`), and the spindle holds a steady ~297 rpm. `TK0` reads `ON`
+only at track 0, and `r` recalibrates the head back there.*
 
 ### Reading the live status line
 
 Each line is one fresh read of the track currently under the head, printed a
-few times a second. (The field order/labels below have been tightened up a
-little since the screenshot above was taken -- the information is the same.)
+few times a second.
 
 ```
 Drive A: T0, H0, RPM 297.30, S9/9, OT NO, SEL:ON, MOT:ON, WP:H Unprot, TK0:L ON, DEN 2:L, DC34:?
