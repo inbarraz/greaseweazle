@@ -261,15 +261,15 @@ def status_line(usb: USB.Unit, st: State) -> str:
     args = st.args
 
     sigs = {}
+    pin_of = {label: pin for label, pin, _ in pinmap.SIGNALS}
     wp_level: Optional[bool] = None
     for label, pin, ambiguous in pinmap.SIGNALS:
         try:
             level = usb.get_pin(pin)
         except USB.CmdError:
-            sigs[label] = '%d:?' % pin
+            sigs[label] = '?'
             continue
-        sigs[label] = '%d:%s%s' % (pin, 'H' if level else 'L',
-                                   '?' if ambiguous else '')
+        sigs[label] = ('H' if level else 'L') + ('?' if ambiguous else '')
         if label == 'WP':
             wp_level = level
 
@@ -321,12 +321,20 @@ def status_line(usb: USB.Unit, st: State) -> str:
         colour = _GREEN if sect == secs else _RED
         sect_field = '%s%s%s' % (colour, sect_field, _RESET)
 
-    return ('Drive %s, SEL %s, MOT %s, RPM %s, Kbps %d, T%d, H%d, %s, OT %s, '
-            'WP %s, DC %s, TK0 %s, Density %d:%s' %
-            (drive_label(args.drive), 'H' if st.selected else 'L',
-             'H' if st.motor else 'L', rpm_str, args.rate, st.cyl, st.head,
-             sect_field, ot_str, wp_str, sigs['DC'], sigs['TK0'],
-             pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L'))
+    # Colour RPM green within +-5 of either standard spindle speed (300rpm
+    # for 5.25"/8", 360rpm for 1.2MB HD), red otherwise. Left uncoloured
+    # when there's no reading at all ('off'/'ERR').
+    rpm_field = rpm_str
+    if rpm_val is not None:
+        in_range = 295 <= rpm_val <= 305 or 355 <= rpm_val <= 365
+        rpm_field = '%s%s%s' % (_GREEN if in_range else _RED, rpm_str, _RESET)
+
+    return ('Drive %s: T%d, H%d, RPM %s, %s, OT %s, SEL:%s, MOT:%s, '
+            'WP:%s, TK0:%s, DEN %d:%s, DC%d:%s' %
+            (drive_label(args.drive), st.cyl, st.head, rpm_field, sect_field,
+             ot_str, 'H' if st.selected else 'L', 'H' if st.motor else 'L',
+             wp_str, sigs['TK0'], pinmap.DENSITY_SELECT_PIN,
+             'H' if st.density else 'L', pin_of['DC'], sigs['DC']))
 
 
 def run(usb: USB.Unit, args, delays: Delays) -> None:

@@ -143,23 +143,17 @@ echo                     the d key while active, since pin 2 is then
 echo                     under automatic control, not manual toggle.
 echo.
 echo OUTPUT LINE FORMAT:
-echo   Drive A, SEL H, MOT H, RPM 297.53, Kbps 250, T0, H0, S9/9, OT NO,
-echo   WP 28:H Unprot, DC 34:?, TK0 26:L, Density 2:L
+echo   Drive A: T0, H0, RPM 297.53, S9/9, OT NO, SEL:H, MOT:H,
+echo   WP:H Unprot, TK0:L, DEN 2:L, DC34:?
 echo.
 echo   Drive       Drive ID you selected.
-echo   SEL         Drive-select line: H while selected, L after the s key
-echo               deselects it. Independent of MOT -- some drives gate
-echo               their head load/unload solenoid off drive-select
-echo               rather than motor-on, so this lets you test that
-echo               without also stopping the spindle.
-echo   MOT         Motor-on line: H while the motor is running, L after
-echo               the m key turns it off.
-echo   RPM         Measured spindle speed this update. Shows ERR if no
-echo               disk or index signal was found, or "off" if you turned
-echo               the motor off with the m key.
-echo   Kbps        The data rate you configured with --rate.
 echo   T           Current track/cylinder number.
 echo   H           Current head/side.
+echo   RPM         Measured spindle speed this update. Green if within 5rpm
+echo               of a standard speed (300 or 360), red otherwise, only
+echo               once there's an actual reading. Shows ERR if no disk or
+echo               index signal was found, or "off" if you turned the
+echo               motor off with the m key.
 echo   S           Sectors read cleanly from the current track, out of how
 echo               many were expected (from --secs, or the guess).
 echo   OT          Off-track sectors: sectors that decoded fine but whose
@@ -172,13 +166,18 @@ echo               different track. More than one wrong track in the same
 echo               read shows as a comma list, e.g. T11/S2,T12/S1. Any
 echo               non-NO value usually means the head is mistracking or
 echo               stepping to the wrong place.
-echo   WP 28       Write-protect pin (28), shown as the raw H/L level plus
+echo   SEL         Drive-select line: H while selected, L after the s key
+echo               deselects it. Independent of MOT -- some drives gate
+echo               their head load/unload solenoid off drive-select
+echo               rather than motor-on, so this lets you test that
+echo               without also stopping the spindle.
+echo   MOT         Motor-on line: H while the motor is running, L after
+echo               the m key turns it off.
+echo   WP          Write-protect pin (28), shown as the raw H/L level plus
 echo               whether that means Prot or Unprot on this drive.
-echo   DC 34       Disk-change/ready pin (34). Shown as ? if your
-echo               Greaseweazle can't read this particular pin back.
-echo   TK0 26      Track-0 sensor pin (26): H or L depending on whether the
+echo   TK0         Track-0 sensor pin (26): H or L depending on whether the
 echo               head is sitting at track 0.
-echo   Density 2   Density-select output pin (2) and the level you've set
+echo   DEN 2       Density-select output pin (2) and the level you've set
 echo               it to with the d key. Note: pin 2 isn't always density
 echo               select. On 8-inch drives, and on most 34-to-50-pin
 echo               adapter cables, the same pin is commonly wired as TG43
@@ -186,6 +185,8 @@ echo               instead (write precompensation enable past a given
 echo               cylinder). The d key just toggles the raw pin either
 echo               way; use --gen-tg43 instead if you want it driven
 echo               automatically by cylinder rather than by hand.
+echo   DC34        Disk-change/ready pin (34). Shown as ? if your
+echo               Greaseweazle can't read this particular pin back.
 echo.
 echo The tool itself prints a key legend when it starts (step, jump, head,
 echo recalibrate, motor, drive-select, density, quit).
