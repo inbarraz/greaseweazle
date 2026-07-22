@@ -32,7 +32,7 @@ def decode_tick(
     """Decode one tick's flux capture.
 
     Returns (sect, off_track): sect = cleanly-decoded sectors whose IDAM
-    cylinder matches `cyl`; off_track = a list of (cyl, count) pairs, one
+    cylinder matches `cyl`. off_track = a list of (cyl, count) pairs, one
     per distinct cylinder actually found among the cleanly-decoded sectors
     that don't match `cyl` (head mistracking). Empty if none.
 

@@ -24,17 +24,17 @@ from greaseweazle.tools.diag import pinmap, decode
 if os.name == 'nt':
     import msvcrt
 
-# ANSI colour for the live sector count: bright green on a complete read,
+# ANSI color for the live sector count: bright green on a complete read,
 # bright red otherwise. Windows 10+ consoles support these once virtual-
-# terminal processing is enabled (see enable_vt_colours).
+# terminal processing is enabled (see enable_vt_colors).
 _GREEN = '\x1b[92m'
 _RED = '\x1b[91m'
 _RESET = '\x1b[0m'
 
 
-def enable_vt_colours() -> None:
+def enable_vt_colors() -> None:
     """Turn on ANSI escape handling in the Windows console (no-op if it
-    isn't a real console, e.g. output redirected to a file)."""
+    isn't a real console, such as output redirected to a file)."""
     if os.name != 'nt':
         return
     try:
@@ -47,14 +47,14 @@ def enable_vt_colours() -> None:
         # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
         kernel32.SetConsoleMode(handle, mode.value | 0x0004)
     except Exception:
-        pass  # colours are cosmetic -- never fail the session over them
+        pass  # colors are cosmetic -- never fail the session over them
 
 KEYLEGEND = """\
 Keys: 0-9=goto track N0  +/-/<-/->=step 1  r=recalibrate
       h=head  m=motor  s=drive-select  d=density-select  q/Esc=quit"""
 
 # (rate_kbps, nominal_rpm) -> (sectors/track, description). Sector count
-# depends on rate *and* rpm together -- e.g. 500kbps is 15 sec/trk at
+# depends on rate *and* rpm together -- for example 500kbps is 15 sec/trk at
 # 360rpm (1.2MB 5.25" HD) but 18 sec/trk at 300rpm (1.44MB 3.5" HD) -- so
 # rate alone can't disambiguate it. Used both for the startup cheat sheet
 # and to guess --secs when the user doesn't supply it.
@@ -130,13 +130,13 @@ def sync_density_pin(usb: USB.Unit, st: State) -> None:
 
 def try_seek(usb: USB.Unit, st: State, new_cyl: int) -> None:
     # No upper clamp -- the user can deliberately probe past the declared
-    # --cyls (e.g. to find a drive's real mechanical limit); usb.seek()
+    # --cyls (for example to find a drive's real mechanical limit). usb.seek()
     # itself rejects nonsense values, and a too-far seek on real hardware
     # surfaces as a CmdError/Fatal we catch below rather than a crash.
     new_cyl = max(0, new_cyl)
     # Double-step: an 80-track drive reading a 40-track disk moves two
     # physical cylinders per logical track. st.cyl stays *logical* (that's
-    # what the sector IDAMs and the decoder compare against); only the
+    # what the sector IDAMs and the decoder compare against). Only the
     # physical seek target is doubled.
     phys_cyl = new_cyl * 2 if st.args.double_step else new_cyl
     try:
@@ -223,7 +223,7 @@ def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
     elif key == 'h':
         if st.args.heads == 2:
             st.head = 1 - st.head
-            # usb.seek() is what actually emits the head-select command; just
+            # usb.seek() is what actually emits the head-select command. Just
             # flipping st.head leaves the device reading the *old* head until
             # the next physical step. Re-seek the current cylinder so the new
             # head takes effect immediately (no movement, same cyl).
@@ -320,17 +320,17 @@ def status_line(usb: USB.Unit, st: State) -> str:
     secs = args.secs if args.secs is not None else guess_secs(args.rate, rpm_val)
     secs_str = str(secs) if secs is not None else '?'
 
-    # Colour the sector field: bright green on a complete read (every
+    # Color the sector field: bright green on a complete read (every
     # expected sector decoded), bright red on anything short of that. Only
     # when the motor is spinning and we actually know the expected count --
-    # a guessed/unknown '?' or a stopped motor leaves it uncoloured.
+    # a guessed/unknown '?' or a stopped motor leaves it uncolored.
     sect_field = 'S%d/%s' % (sect, secs_str)
     if st.motor and secs is not None:
-        colour = _GREEN if sect == secs else _RED
-        sect_field = '%s%s%s' % (colour, sect_field, _RESET)
+        color = _GREEN if sect == secs else _RED
+        sect_field = '%s%s%s' % (color, sect_field, _RESET)
 
-    # Colour RPM green within +-5 of either standard spindle speed (300rpm
-    # for 5.25"/8", 360rpm for 1.2MB HD), red otherwise. Left uncoloured
+    # Color RPM green within +-5 of either standard spindle speed (300rpm
+    # for 5.25"/8", 360rpm for 1.2MB HD), red otherwise. Left uncolored
     # when there's no reading at all ('off'/'ERR').
     rpm_field = rpm_str
     if rpm_val is not None:
@@ -352,13 +352,13 @@ def run(usb: USB.Unit, args, delays: Delays) -> None:
         raise error.Fatal(
             'gw diag requires Windows (uses msvcrt for keyboard input)')
 
-    enable_vt_colours()
+    enable_vt_colors()
     st = State(args, delays)
     print(cheatsheet())
     print(KEYLEGEND)
     if args.gen_tg43:
-        print('TG43 auto-tracking enabled on pin 2 (threshold T%d); '
-              'the d key is disabled' % pinmap.TG43_TRACK_THRESHOLD)
+        print('TG43 auto-tracking enabled on pin 2 (threshold T%d). '
+              'The d key is disabled' % pinmap.TG43_TRACK_THRESHOLD)
     sync_density_pin(usb, st)  # make sure GW is really driving what we assume
     recalibrate(usb, st)  # known starting position for the session
 
@@ -394,7 +394,7 @@ def main(argv) -> None:
     parser.add_argument("--step-delay", type=util.uint, metavar="N",
                         help="Step Delay (usecs) for this session, as "
                         "'gw delays --step' (overrides the persisted "
-                        "setting; otherwise it is preserved across diag's "
+                        "setting. Otherwise it is preserved across diag's "
                         "internal resets rather than reverting to the "
                         "firmware default)")
     parser.add_argument("--encoding", choices=['mfm', 'fm'], default='mfm',

@@ -33,7 +33,7 @@ TG43_TRACK_THRESHOLD = 60
 # Pin numbers are the standard Shugart/IBM-PC 34-pin assignments and don't
 # differ between the two cabling conventions for these particular signals.
 # Pin 34's *meaning* does vary by drive family (Disk-Change on IBM/PC,
-# often Ready on Shugart, remapped further on some drives e.g. Amiga) --
+# often Ready on Shugart, remapped further on some drives such as Amiga) --
 # hence 'ambiguous': show the raw level, not an asserted semantic.
 TK0_PIN = 26
 

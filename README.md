@@ -18,13 +18,13 @@ For the current track it reports:
 
 * **On-track vs off-track sector counts**, decoded live from the flux with
   an IBM MFM/FM decoder, so you can see at a glance whether the head is
-  reading clean data (coloured green when the full sector count reads
+  reading clean data (colored green when the full sector count reads
   clean, red otherwise). When sectors are off-track, it also tells you
   *which* track those stray sectors actually belong to.
 * **Drive status pins**: Write-Protect, Disk-Change, Track-0 and Density,
   plus the host-driven Drive-Select and Motor-On lines.
 * **Live RPM**, self-correcting the read window as the measured speed
-  drifts, coloured green within 5rpm of a standard spindle speed (300 or
+  drifts, colored green within 5rpm of a standard spindle speed (300 or
   360) and red otherwise.
 * **`--double-step`** for reading a 40-track disk in an 80-track drive.
 * **`--step-delay`**, and delay settings from `gw delays` are now preserved
@@ -58,14 +58,14 @@ Drive A: T0, H0, RPM 297.30, S9/9, OT NO, SEL:ON, MOT:ON, WP:H Unprot, TK0:L ON,
 | `Drive A` | The drive being read (set with `--drive`). |
 | `T0` | Current track (cylinder) under the head. |
 | `H0` | Current head/side. |
-| `RPM 297.30` | Measured spindle speed, coloured green within 5rpm of a standard spindle speed (300 or 360rpm) and red otherwise. Shows `ERR` when no disk or index pulse is seen, or `off` when you stop the motor with the `m` key. |
-| `SX/X` | Sectors read cleanly out of the number expected, coloured green when complete and red otherwise. `9/9` means every sector decoded; `S7/9` would mean two were missing or unreadable. The total sector count will vary depending on the type of disk being read. |
+| `RPM 297.30` | Measured spindle speed, colored green within 5rpm of a standard spindle speed (300 or 360rpm) and red otherwise. Shows `ERR` when no disk or index pulse is seen, or `off` when you stop the motor with the `m` key. |
+| `SX/X` | Sectors read cleanly out of the number expected, colored green when complete and red otherwise. `9/9` means every sector decoded. `S7/9` would mean two were missing or unreadable. The total sector count will vary depending on the type of disk being read. |
 | `OT NO` | Off-track sectors. `NO` means none. Otherwise it lists which track the stray sectors claim to come from, as `T<cyl>/S<count>` (for example `T11/S2`), which points to the head mistracking or stepping to the wrong place. |
 | `SEL:ON` | Drive-select line: `ON` while selected, `OFF` after the `s` key deselects it. Independent of `MOT` -- some drives gate their head load/unload solenoid off drive-select rather than motor-on. |
 | `MOT:ON` | Motor-on line: `ON` while the motor is running, `OFF` after the `m` key turns it off. |
 | `WP:H Unprot` | Write-protect line (34-pin connector pin 28): the raw level (`H` or `L`) and what it means on this drive (`Prot` or `Unprot`). |
 | `TK0:L ON` | Track-0 sensor (pin 26): the raw level plus `ON`/`OFF` for whether the head is at track 0 (active-low, so `L` is `ON`). |
-| `DEN 2:L` | Density-select output on pin 2 and the level you have set with the `d` key. On some dual-speed drives toggling `d` also changes the spindle speed: many 1.2MB 5.25-inch drives switch between 360 and 300 rpm with this pin, which you will see reflected live in the `RPM` field. Note too that on many 8-inch drives and 34-to-50-pin adapter cables pin 2 is wired as TG43 rather than density select; see `--gen-tg43`. |
+| `DEN 2:L` | Density-select output on pin 2 and the level you have set with the `d` key. On some dual-speed drives toggling `d` also changes the spindle speed: many 1.2MB 5.25-inch drives switch between 360 and 300 rpm with this pin, which you will see reflected live in the `RPM` field. Note too that on many 8-inch drives and 34-to-50-pin adapter cables pin 2 is wired as TG43 rather than density select. See `--gen-tg43`. |
 | `DC34:?` | Disk-change/ready line on pin 34. `?` means your Greaseweazle cannot read this pin back. |
 
 For a meaningful test, put a **known-good, standard IBM PC MFM formatted
@@ -81,12 +81,12 @@ reference disk.
 gw diag --rate 500 [options]
 ```
 
-`--rate` (data rate in kbps) is required; the rest have sensible defaults.
+`--rate` (data rate in kbps) is required. The rest have sensible defaults.
 Common options:
 
 | Option | Purpose |
 |--------|---------|
-| `--rate KBPS` | Data rate, e.g. `250`, `500`, `1000` (**required**) |
+| `--rate KBPS` | Data rate, such as `250`, `500`, `1000` (**required**) |
 | `--secs N` | Expected sectors/track (guessed from rate + rpm for standard formats if omitted) |
 | `--rpm N` | Fix the spindle speed instead of tracking the live measurement |
 | `--encoding mfm\|fm` | Track encoding (default `mfm`) |

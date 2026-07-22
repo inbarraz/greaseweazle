@@ -103,14 +103,14 @@ echo USAGE:
 echo   gw-diag.bat --rate KBPS [other options]
 echo.
 echo PARAMETERS:
-echo   --device NAME    Serial port name, e.g. COM3. Optional, only needed
+echo   --device NAME    Serial port name, such as COM3. Optional, only needed
 echo                     if the Greaseweazle isn't auto-detected or you have
 echo                     more than one plugged in.
 echo   --drive ID       Which physical drive to use. A or B for an IBM/PC
 echo                     cable, 0-3 for a Shugart cable. Default: A.
 echo   --cyls N         Number of cylinders the drive has. Default: 84. You
 echo                     can still step past this to probe a drive's real
-echo                     mechanical limit; it's just the default range.
+echo                     mechanical limit. It's just the default range.
 echo   --heads N        Number of heads/sides: 1 or 2. Default: 2.
 echo   --double-step    Step two physical cylinders per logical track, for
 echo                     an 80-track drive reading a 40-track disk.
@@ -120,7 +120,7 @@ echo                     without it, diag preserves whatever "gw delays"
 echo                     already has set, instead of reverting to the
 echo                     firmware default the way it used to.
 echo   --encoding TYPE  mfm or fm. Default: mfm. Almost everything from the
-echo                     PC, Amiga and Atari ST era is mfm; old 8-inch or
+echo                     PC, Amiga and Atari ST era is mfm. Old 8-inch or
 echo                     single-density disks are fm.
 echo   --rate KBPS      Data rate in kilobits per second. Required. Common
 echo                     values: 250 for double density, 500 for high
@@ -160,10 +160,10 @@ echo   OT          Off-track sectors: sectors that decoded fine but whose
 echo               header said a different track than where the head
 echo               actually is. Shows NO if there aren't any. Otherwise
 echo               shows which track(s) they actually came from, as
-echo               T^<cyl^>/S^<count^>, e.g. T11/S2 means 2 sectors read
+echo               T^<cyl^>/S^<count^>, for example T11/S2 means 2 sectors read
 echo               cleanly but tagged as track 11 while the head is on a
 echo               different track. More than one wrong track in the same
-echo               read shows as a comma list, e.g. T11/S2,T12/S1. Any
+echo               read shows as a comma list, such as T11/S2,T12/S1. Any
 echo               non-NO value usually means the head is mistracking or
 echo               stepping to the wrong place.
 echo   SEL         Drive-select line: ON while selected, OFF after the s
@@ -183,7 +183,7 @@ echo               select. On 8-inch drives, and on most 34-to-50-pin
 echo               adapter cables, the same pin is commonly wired as TG43
 echo               instead (write precompensation enable past a given
 echo               cylinder). The d key just toggles the raw pin either
-echo               way; use --gen-tg43 instead if you want it driven
+echo               way. Use --gen-tg43 instead if you want it driven
 echo               automatically by cylinder rather than by hand.
 echo   DC34        Disk-change/ready pin (34). Shown as ? if your
 echo               Greaseweazle can't read this particular pin back.
