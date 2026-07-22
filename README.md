@@ -39,10 +39,11 @@ motor-on), `d` toggles density-select, and `q` / `Esc` quits.
 
 ![gw diag stepping across a disk, most tracks reading cleanly with two failed reads at track 40](screenshots/gw-diag.png)
 
-*Stepping across a single-sided 5.25-inch disk at 250 kbps. Most tracks read
-clean (green `S9/9`) with no off-track sectors (`OT NO`), track 40 dropped two
-reads (red `S0/9`), and the spindle holds a steady ~297 rpm. `TK0` reads `ON`
-only at track 0, and `r` recalibrates the head back there.*
+*Stepping across a double-sided 5.25-inch disk in a 40-track drive at 250 kbps.
+Most tracks read clean (green `S9/9`) with no off-track sectors (`OT NO`),
+track 40 dropped two reads (red `S0/9`), and the spindle holds a steady ~297
+rpm. `TK0` reads `ON` only at track 0, and `r` recalibrates the head back
+there.*
 
 ### Reading the live status line
 
