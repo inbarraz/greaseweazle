@@ -1,6 +1,6 @@
 # Greaseweazle Host Tools: Diagnostic Edition
 
-## About this fork: the `gw diag` command
+## About this fork: the `gw-diag` command
 
 This is a fork of [keirf/greaseweazle][upstream] that adds **one new command,
 `gw-diag`**: an interactive, live disk/drive diagnostic for bench-testing
