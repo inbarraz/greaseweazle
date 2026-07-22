@@ -23,6 +23,31 @@ from greaseweazle.tools.diag import pinmap, decode
 if os.name == 'nt':
     import msvcrt
 
+# ANSI colour for the live sector count: bright green on a complete read,
+# bright red otherwise. Windows 10+ consoles support these once virtual-
+# terminal processing is enabled (see enable_vt_colours).
+_GREEN = '\x1b[92m'
+_RED = '\x1b[91m'
+_RESET = '\x1b[0m'
+
+
+def enable_vt_colours() -> None:
+    """Turn on ANSI escape handling in the Windows console (no-op if it
+    isn't a real console, e.g. output redirected to a file)."""
+    if os.name != 'nt':
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:
+        pass  # colours are cosmetic -- never fail the session over them
+
 KEYLEGEND = """\
 Keys: 0-9=goto track N0  +/-/<-/->=step 1  r=recalibrate
       h=head  m=motor  d=density-select  q/Esc=quit"""
@@ -34,6 +59,10 @@ Keys: 0-9=goto track N0  +/-/<-/->=step 1  r=recalibrate
 # and to guess --secs when the user doesn't supply it.
 STANDARD_FORMATS = {
     (250, 300): (9, '360KB 5.25" DD / 720KB 3.5" DD'),
+    # 300kbps is the odd one: a 1.2MB 5.25" HD drive spins at 360rpm, so
+    # reading a 300rpm-written DD disk in it scales the data rate up by
+    # 360/300 = 1.2 (250 -> 300kbps) while the content stays 9 sec/trk.
+    (300, 360): (9, 'DD disk in 1.2MB 5.25" HD drive @ 360rpm'),
     (500, 360): (15, '1.2MB 5.25" HD'),
     (500, 300): (18, '1.44MB 3.5" HD'),
     (1000, 300): (36, '2.88MB 3.5" ED'),
@@ -102,8 +131,13 @@ def try_seek(usb: USB.Unit, st: State, new_cyl: int) -> None:
     # itself rejects nonsense values, and a too-far seek on real hardware
     # surfaces as a CmdError/Fatal we catch below rather than a crash.
     new_cyl = max(0, new_cyl)
+    # Double-step: an 80-track drive reading a 40-track disk moves two
+    # physical cylinders per logical track. st.cyl stays *logical* (that's
+    # what the sector IDAMs and the decoder compare against); only the
+    # physical seek target is doubled.
+    phys_cyl = new_cyl * 2 if st.args.double_step else new_cyl
     try:
-        usb.seek(new_cyl, st.head)
+        usb.seek(phys_cyl, st.head)
         st.cyl = new_cyl
     except (error.Fatal, USB.CmdError) as e:
         print(str(e))
@@ -179,6 +213,11 @@ def handle_key(usb: USB.Unit, st: State, key: Optional[str]) -> bool:
     elif key == 'h':
         if st.args.heads == 2:
             st.head = 1 - st.head
+            # usb.seek() is what actually emits the head-select command; just
+            # flipping st.head leaves the device reading the *old* head until
+            # the next physical step. Re-seek the current cylinder so the new
+            # head takes effect immediately (no movement, same cyl).
+            try_seek(usb, st, st.cyl)
     elif key == 'r':
         recalibrate(usb, st)
     elif key == 'm':
@@ -253,10 +292,19 @@ def status_line(usb: USB.Unit, st: State) -> str:
     secs = args.secs if args.secs is not None else guess_secs(args.rate, rpm_val)
     secs_str = str(secs) if secs is not None else '?'
 
-    return ('Drive %s, RPM %s, Kbps %d, T%d, H%d, S%d/%s, OT %s, '
+    # Colour the sector field: bright green on a complete read (every
+    # expected sector decoded), bright red on anything short of that. Only
+    # when the motor is spinning and we actually know the expected count --
+    # a guessed/unknown '?' or a stopped motor leaves it uncoloured.
+    sect_field = 'S%d/%s' % (sect, secs_str)
+    if st.motor and secs is not None:
+        colour = _GREEN if sect == secs else _RED
+        sect_field = '%s%s%s' % (colour, sect_field, _RESET)
+
+    return ('Drive %s, RPM %s, Kbps %d, T%d, H%d, %s, OT %s, '
             'WP %s, DC %s, TK0 %s, Density %d:%s' %
             (drive_label(args.drive), rpm_str, args.rate, st.cyl, st.head,
-             sect, secs_str, ot_str, wp_str, sigs['DC'], sigs['TK0'],
+             sect_field, ot_str, wp_str, sigs['DC'], sigs['TK0'],
              pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L'))
 
 
@@ -266,6 +314,7 @@ def run(usb: USB.Unit, args) -> None:
         raise error.Fatal(
             'gw diag requires Windows (uses msvcrt for keyboard input)')
 
+    enable_vt_colours()
     st = State(args)
     print(cheatsheet())
     print(KEYLEGEND)
@@ -301,6 +350,9 @@ def main(argv) -> None:
                         metavar="N", help="number of cylinders")
     parser.add_argument("--heads", type=int, choices=[1, 2], default=2,
                         help="number of heads")
+    parser.add_argument("--double-step", action="store_true",
+                        help="step two physical cylinders per track, for an "
+                        "80-track drive reading a 40-track disk")
     parser.add_argument("--encoding", choices=['mfm', 'fm'], default='mfm',
                         help="track encoding")
     parser.add_argument("--rate", type=util.min_int(1), required=True,
