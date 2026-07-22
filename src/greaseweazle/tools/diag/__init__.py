@@ -99,6 +99,7 @@ class State:
         self.selected = True  # util.with_drive_selected() selects before run()
         self.density = False
         self.last_rpm: Optional[float] = None  # self-corrects the read window
+        self.err_streak = 0  # consecutive ticks with no index (for recovery)
 
 
 def read_key() -> Optional[str]:
@@ -295,17 +296,32 @@ def status_line(usb: USB.Unit, st: State) -> str:
         # window from the last known RPM (falling back to --rpm, then a
         # generic guess) keeps it self-correcting once a real disk is in.
         assumed_rpm = args.rpm or st.last_rpm or 250.0
+        # Cap the assumed speed at 400rpm so the window is always at least
+        # 2 revs of the slowest standard drive. A stale/high last_rpm must
+        # never size the window below one real revolution, or the read can
+        # never catch a second index pulse to recover from.
+        assumed_rpm = min(assumed_rpm, 400.0)
         ticks = int(usb.sample_freq * (60 / assumed_rpm) * 2.0)
         try:
             flux = usb.read_track(revs=0, ticks=ticks)
-            tpr = flux.index_list[-1] / flux.sample_freq
-            rpm_val = 60 / tpr
-            rpm_str = '%.2f' % rpm_val
-            st.last_rpm = rpm_val
-            time_per_rev = (60 / args.rpm) if args.rpm else tpr
-            mode = Mode.MFM if args.encoding == 'mfm' else Mode.FM
-            sect, off_track = decode.decode_tick(
-                flux, st.cyl, st.head, mode, args.rate, time_per_rev)
+            # Need two index pulses for a genuine index-to-index period.
+            # index_list[-1] with only one index is the partial capture-
+            # start-to-index time, which reads as a spuriously high RPM.
+            # Storing that in last_rpm shrinks the next window into a
+            # spiral the read never climbs back out of (this is what makes
+            # RPM sometimes never come back after a disk is pulled and
+            # reinserted). Fewer than two indexes means no reading.
+            if len(flux.index_list) >= 2:
+                tpr = flux.index_list[-1] / flux.sample_freq
+                rpm_val = 60 / tpr
+                rpm_str = '%.2f' % rpm_val
+                st.last_rpm = rpm_val
+                time_per_rev = (60 / args.rpm) if args.rpm else tpr
+                mode = Mode.MFM if args.encoding == 'mfm' else Mode.FM
+                sect, off_track = decode.decode_tick(
+                    flux, st.cyl, st.head, mode, args.rate, time_per_rev)
+            else:
+                rpm_str = 'ERR'
         except USB.CmdError:
             rpm_str = 'ERR'
         except Exception:
@@ -313,6 +329,26 @@ def status_line(usb: USB.Unit, st: State) -> str:
             # kill the session, just report nothing decoded this tick.
             rpm_str = 'ERR'
             sect, off_track = 0, []
+
+        if rpm_val is not None:
+            st.err_streak = 0
+        elif st.selected:
+            # No index this tick while we are selected and meant to be
+            # spinning. A brief run of these is just an empty or spinning-up
+            # drive, but a sustained run can also mean the device stopped
+            # reporting the index until re-poked (not simply an absent disk),
+            # which is why RPM sometimes stays ERR after a disk is pulled and
+            # reinserted. Every few ticks, re-assert select/motor and re-seek
+            # the current cylinder to kick it, without spamming a command
+            # every tick.
+            st.err_streak += 1
+            if st.err_streak % 4 == 0:
+                try:
+                    usb.drive_select(args.drive.unit_id)
+                    usb.drive_motor(args.drive.unit_id, True)
+                    try_seek(usb, st, st.cyl)
+                except Exception:
+                    pass
 
     ot_str = ('NO' if not off_track else
              ','.join('T%d/S%d' % (c, n) for c, n in off_track))
