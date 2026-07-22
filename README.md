@@ -3,14 +3,14 @@
 ## About this fork: the `gw diag` command
 
 This is a fork of [keirf/greaseweazle][upstream] that adds **one new command,
-`gw diag`**: an interactive, live disk/drive diagnostic for bench-testing
+`gw-diag`**: an interactive, live disk/drive diagnostic for bench-testing
 floppy drives and disks in real time. Everything else in this repository is
 unchanged from upstream, and the change is self-contained (a new
 `tools/diag/` package plus a single dispatch line in `cli.py`).
 
 ### What it does
 
-Where `gw read` takes a single pass and exits, `gw diag` keeps the spindle
+Where `gw read` takes a single pass and exits, `gw-diag` keeps the spindle
 spinning and lets you drive the head interactively while it continuously
 decodes the track currently under the head. It is built for diagnosing
 drives: RPM, head movement, head alignment, etc.
@@ -28,7 +28,7 @@ For the current track it reports:
   360) and red otherwise.
 * **`--double-step`** for reading a 40-track disk in an 80-track drive.
 * **`--step-delay`**, and delay settings from `gw delays` are now preserved
-  across `gw diag`'s internal resets instead of silently reverting to the
+  across `gw-diag`'s internal resets instead of silently reverting to the
   firmware default partway through a session.
 
 Interactive keys: number keys jump to a track, `+` / `-` / arrow keys step a
@@ -41,9 +41,9 @@ motor-on), `d` toggles density-select, and `q` / `Esc` quits.
 
 *Stepping across a double-sided 5.25-inch disk in a 40-track drive at 250 kbps.
 Most tracks read clean (green `S9/9`) with no off-track sectors (`OT NO`),
-track 40 dropped two reads (red `S0/9`), and the spindle holds a steady ~297
-rpm. `TK0` reads `ON` only at track 0, and `r` recalibrates the head back
-there.*
+track 40 dropped three reads (red `S0/9`) because track 40 is blank,
+and the spindle holds a steady ~297 rpm. `TK0` reads `ON` only at track 0,
+and `r` recalibrates the head back there.*
 
 ### Reading the live status line
 
@@ -71,15 +71,15 @@ Drive A: T0, H0, RPM 297.30, S9/9, OT NO, SEL:ON, MOT:ON, WP:H Unprot, TK0:L ON,
 
 For a meaningful test, put a **known-good, standard IBM PC MFM formatted
 floppy** in the drive, ideally one written on a drive known to be in good
-order. A clean full-count read (here `S9/9`) with `OT NO` is then unambiguous
-confirmation that the drive under test is reading correctly, and anything
-worse points at the drive or disk you are checking rather than at the
-reference disk.
+order. A clean full-count read of a double density MFM disk (here `S9/9`)
+with `OT NO` is then unambiguous confirmation that the drive under test is
+reading correctly, and anything worse points at the drive or disk you are
+checking rather than at the reference disk.
 
 ### Usage
 
 ```
-gw diag --rate 500 [options]
+gw-diag --rate 500 [options]
 ```
 
 `--rate` (data rate in kbps) is required. The rest have sensible defaults.
@@ -97,11 +97,11 @@ Common options:
 | `--step-delay N` | Step delay (usecs) for this session only, as `gw delays --step`. Without it, whatever `gw delays` already has set is preserved rather than reverting to the firmware default partway through the session |
 | `--gen-tg43` | Auto-drive pin 2 as a TG43 signal for 8-inch drives |
 
-Run `gw diag --help` for the full list.
+Run `gw-diag --help` for the full list.
 
 ### Getting started
 
-`gw diag` currently runs on **Windows only**: it uses the Windows `msvcrt`
+`gw-diag` currently runs on **Windows only**: it uses the Windows `msvcrt`
 console API for live keyboard input. A macOS/Linux key-input path has not
 been written yet, and the command will exit with an error on those platforms.
 Contributions to port it are welcome (see
@@ -116,7 +116,18 @@ speed-up extension is optional at runtime, so you can skip building it and
 run the pure-Python code directly. The included `gw-diag.bat` launcher does
 the setup for you: it writes the version stub, sets the environment, and
 installs the four runtime packages on first run. Requires only
-[Python 3.8 or newer](https://www.python.org/downloads/windows/) on your PATH:
+[Python 3.8 or newer](https://www.python.org/downloads/windows/) on your PATH.
+
+First download the latest release for Greaseweazle from the repo's releases
+section:
+
+[https://github.com/keirf/greaseweazle/releases](https://github.com/keirf/greaseweazle/releases)
+
+Unzip the files to a location on your hard drive. Then download this repo
+and copy the files into the directory, overwriting the any files when asked.
+
+You can also use 'git clone' is available, just make sure to put these files
+on top of the release of Greaseweazle:
 
 ```
 git clone -b diag https://github.com/misterblack1/greaseweazle.git
