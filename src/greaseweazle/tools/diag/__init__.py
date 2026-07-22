@@ -263,6 +263,7 @@ def status_line(usb: USB.Unit, st: State) -> str:
     sigs = {}
     pin_of = {label: pin for label, pin, _ in pinmap.SIGNALS}
     wp_level: Optional[bool] = None
+    tk0_level: Optional[bool] = None
     for label, pin, ambiguous in pinmap.SIGNALS:
         try:
             level = usb.get_pin(pin)
@@ -272,11 +273,18 @@ def status_line(usb: USB.Unit, st: State) -> str:
         sigs[label] = ('H' if level else 'L') + ('?' if ambiguous else '')
         if label == 'WP':
             wp_level = level
+        elif label == 'TK0':
+            tk0_level = level
 
     wp_str = sigs['WP']
     if wp_level is not None:
         # This interface is active-low: WP asserted (L) == write-protected.
         wp_str += ' Unprot' if wp_level else ' Prot'
+
+    tk0_str = sigs['TK0']
+    if tk0_level is not None:
+        # Active-low: TK0 asserted (L) == head is at track 0.
+        tk0_str += ' OFF' if tk0_level else ' ON'
 
     rpm_str, rpm_val, sect = 'off', None, 0
     off_track: List[Tuple[int, int]] = []
@@ -332,9 +340,10 @@ def status_line(usb: USB.Unit, st: State) -> str:
     return ('Drive %s: T%d, H%d, RPM %s, %s, OT %s, SEL:%s, MOT:%s, '
             'WP:%s, TK0:%s, DEN %d:%s, DC%d:%s' %
             (drive_label(args.drive), st.cyl, st.head, rpm_field, sect_field,
-             ot_str, 'H' if st.selected else 'L', 'H' if st.motor else 'L',
-             wp_str, sigs['TK0'], pinmap.DENSITY_SELECT_PIN,
-             'H' if st.density else 'L', pin_of['DC'], sigs['DC']))
+             ot_str, 'ON' if st.selected else 'OFF',
+             'ON' if st.motor else 'OFF', wp_str, tk0_str,
+             pinmap.DENSITY_SELECT_PIN, 'H' if st.density else 'L',
+             pin_of['DC'], sigs['DC']))
 
 
 def run(usb: USB.Unit, args, delays: Delays) -> None:

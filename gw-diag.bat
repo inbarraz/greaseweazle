@@ -143,8 +143,8 @@ echo                     the d key while active, since pin 2 is then
 echo                     under automatic control, not manual toggle.
 echo.
 echo OUTPUT LINE FORMAT:
-echo   Drive A: T0, H0, RPM 297.53, S9/9, OT NO, SEL:H, MOT:H,
-echo   WP:H Unprot, TK0:L, DEN 2:L, DC34:?
+echo   Drive A: T0, H0, RPM 297.53, S9/9, OT NO, SEL:ON, MOT:ON,
+echo   WP:H Unprot, TK0:L ON, DEN 2:L, DC34:?
 echo.
 echo   Drive       Drive ID you selected.
 echo   T           Current track/cylinder number.
@@ -166,17 +166,17 @@ echo               different track. More than one wrong track in the same
 echo               read shows as a comma list, e.g. T11/S2,T12/S1. Any
 echo               non-NO value usually means the head is mistracking or
 echo               stepping to the wrong place.
-echo   SEL         Drive-select line: H while selected, L after the s key
-echo               deselects it. Independent of MOT -- some drives gate
-echo               their head load/unload solenoid off drive-select
+echo   SEL         Drive-select line: ON while selected, OFF after the s
+echo               key deselects it. Independent of MOT -- some drives
+echo               gate their head load/unload solenoid off drive-select
 echo               rather than motor-on, so this lets you test that
 echo               without also stopping the spindle.
-echo   MOT         Motor-on line: H while the motor is running, L after
-echo               the m key turns it off.
+echo   MOT         Motor-on line: ON while the motor is running, OFF
+echo               after the m key turns it off.
 echo   WP          Write-protect pin (28), shown as the raw H/L level plus
 echo               whether that means Prot or Unprot on this drive.
-echo   TK0         Track-0 sensor pin (26): H or L depending on whether the
-echo               head is sitting at track 0.
+echo   TK0         Track-0 sensor pin (26): raw H/L level plus ON when the
+echo               head is at track 0 (L), OFF otherwise (H).
 echo   DEN 2       Density-select output pin (2) and the level you've set
 echo               it to with the d key. Note: pin 2 isn't always density
 echo               select. On 8-inch drives, and on most 34-to-50-pin
