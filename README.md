@@ -100,7 +100,7 @@ Common options:
 
 Run `gw-diag --help` for the full list.
 
-In these examples `gw-diag` is the launcher from Option A below —
+In these examples `gw-diag` is the launcher from Option A below:
 `gw-diag.bat` on Windows, `./gw-diag.sh` on macOS and Linux. If you installed
 with pipx (Option B), the command is `gw diag` with a space.
 
@@ -109,9 +109,9 @@ with pipx (Option B), the command is `gw diag` with a space.
 `gw-diag` runs on **Windows, macOS and Linux**. Live keyboard input goes
 through a small per-platform layer
 ([`src/greaseweazle/tools/diag/keyboard.py`](src/greaseweazle/tools/diag/keyboard.py)):
-the `msvcrt` console API on Windows, and `termios` cbreak mode on POSIX. It
-needs an interactive terminal either way, and says so plainly if stdin has
-been redirected or piped.
+the `msvcrt` console API on Windows, and `termios` cbreak mode on POSIX.
+Either way it needs an interactive terminal. On macOS and Linux it says so
+and exits straight away if stdin has been redirected or piped.
 
 #### Windows
 
@@ -172,8 +172,8 @@ Most current distributions mark the system Python "externally managed"
 (PEP 668) and refuse a plain `pip install` into it, so the launcher puts
 those packages in a `.venv` folder beside itself instead. That needs no root,
 touches nothing outside the clone, and is undone by deleting the folder. On
-Debian and Ubuntu, `python3 -m venv` is a separate package — `sudo apt
-install python3-venv` — and the launcher says so if it is missing.
+Debian and Ubuntu, `python3 -m venv` is a separate package
+(`sudo apt install python3-venv`), and the launcher says so if it is missing.
 
 ```
 git clone -b diag https://github.com/misterblack1/greaseweazle.git
