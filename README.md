@@ -200,10 +200,11 @@ pipx install git+https://github.com/misterblack1/greaseweazle@diag
 gw diag --rate 500
 ```
 
-### Status
+### Status and LLM Usage
 
-`gw diag` is intended to be offered upstream. Like the rest of Greaseweazle,
-it is released into the public domain. See [COPYING](COPYING).
+`gw diag` like the rest of Greaseweazle, is released into the public domain. See [COPYING](COPYING).
+
+**LLM assistance was used in the creation of the `gw diag` code. Design, QA and testing were done by hand.**
 
 [upstream]: https://github.com/keirf/greaseweazle
 
