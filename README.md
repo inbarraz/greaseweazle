@@ -100,16 +100,18 @@ Common options:
 
 Run `gw-diag --help` for the full list.
 
-In these examples `gw-diag` is the `gw-diag.bat` launcher from Option A below.
-If you installed with pipx (Option B), the command is `gw diag` with a space.
+In these examples `gw-diag` is the launcher from Option A below —
+`gw-diag.bat` on Windows, `./gw-diag.sh` on macOS and Linux. If you installed
+with pipx (Option B), the command is `gw diag` with a space.
 
 ### Getting started
 
-`gw-diag` currently runs on **Windows only**: it uses the Windows `msvcrt`
-console API for live keyboard input. A macOS/Linux key-input path has not
-been written yet, and the command will exit with an error on those platforms.
-Contributions to port it are welcome (see
-[`src/greaseweazle/tools/diag/__init__.py`](src/greaseweazle/tools/diag/__init__.py)).
+`gw-diag` runs on **Windows, macOS and Linux**. Live keyboard input goes
+through a small per-platform layer
+([`src/greaseweazle/tools/diag/keyboard.py`](src/greaseweazle/tools/diag/keyboard.py)):
+the `msvcrt` console API on Windows, and `termios` cbreak mode on POSIX. It
+needs an interactive terminal either way, and says so plainly if stdin has
+been redirected or piped.
 
 #### Windows
 
@@ -157,11 +159,45 @@ gw diag --rate 500
 
 #### macOS and Linux
 
-The `gw diag` command does not run on these platforms yet (see above). The
-rest of the Greaseweazle tools from this fork install and work normally with:
+Pick whichever matches what you have installed.
+
+**Option A, run from source with `gw-diag.sh` (no compiler needed).** The
+speed-up extension is optional at runtime, so you can skip building it and
+run the pure-Python code directly. The included `gw-diag.sh` launcher does
+the setup for you: it writes the version stub, sets the environment, and
+installs the four runtime packages on first run. Requires only Python 3.8 or
+newer.
+
+Most current distributions mark the system Python "externally managed"
+(PEP 668) and refuse a plain `pip install` into it, so the launcher puts
+those packages in a `.venv` folder beside itself instead. That needs no root,
+touches nothing outside the clone, and is undone by deleting the folder. On
+Debian and Ubuntu, `python3 -m venv` is a separate package — `sudo apt
+install python3-venv` — and the launcher says so if it is missing.
+
+```
+git clone -b diag https://github.com/misterblack1/greaseweazle.git
+cd greaseweazle
+./gw-diag.sh --rate 500
+```
+
+Run `./gw-diag.sh` on its own (no arguments) for full help on every option
+and the meaning of each field in the output line.
+
+If the Greaseweazle is detected but cannot be opened (a permission error on
+`/dev/tty*`), install the udev rules shipped with the repo and then unplug
+and reconnect the device:
+
+```
+sudo cp scripts/49-greaseweazle.rules /etc/udev/rules.d/
+```
+
+**Option B, install with pipx (needs a C compiler).** This also gets you the
+standard `gw` tool for reading, writing, and everything else:
 
 ```
 pipx install git+https://github.com/misterblack1/greaseweazle@diag
+gw diag --rate 500
 ```
 
 ### Status
