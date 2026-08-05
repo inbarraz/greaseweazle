@@ -19,14 +19,12 @@ from greaseweazle.codec import codec  # noqa: F401
 from greaseweazle.codec.ibm.ibm import Mode
 from greaseweazle.tools import util
 from greaseweazle.tools.delays import Delays
-from greaseweazle.tools.diag import pinmap, decode
-
-if os.name == 'nt':
-    import msvcrt
+from greaseweazle.tools.diag import pinmap, decode, keyboard
 
 # ANSI color for the live sector count: bright green on a complete read,
 # bright red otherwise. Windows 10+ consoles support these once virtual-
-# terminal processing is enabled (see enable_vt_colors).
+# terminal processing is enabled (see enable_vt_colors); POSIX terminals
+# handle them natively.
 _GREEN = '\x1b[92m'
 _RED = '\x1b[91m'
 _RESET = '\x1b[0m'
@@ -86,9 +84,6 @@ def guess_secs(rate: int, rpm: Optional[float]) -> Optional[int]:
     return entry[0] if entry else None
 
 
-_ARROW_MAP = {b'H': 'up', b'P': 'down', b'K': 'left', b'M': 'right'}
-
-
 class State:
     def __init__(self, args, delays: Delays) -> None:
         self.args = args
@@ -100,22 +95,6 @@ class State:
         self.density = False
         self.last_rpm: Optional[float] = None  # self-corrects the read window
         self.err_streak = 0  # consecutive ticks with no index (for recovery)
-
-
-def read_key() -> Optional[str]:
-    ch = msvcrt.getch()
-    if ch in (b'\x00', b'\xe0'):
-        return _ARROW_MAP.get(msvcrt.getch())
-    if ch in (b'\r', b'\n'):
-        return 'enter'
-    if ch == b'\x1b':
-        return 'esc'
-    if ch == b'\x08':
-        return 'backspace'
-    try:
-        return ch.decode('ascii')
-    except UnicodeDecodeError:
-        return None
 
 
 def sync_density_pin(usb: USB.Unit, st: State) -> None:
@@ -384,10 +363,6 @@ def status_line(usb: USB.Unit, st: State) -> str:
 
 def run(usb: USB.Unit, args, delays: Delays) -> None:
 
-    if os.name != 'nt':
-        raise error.Fatal(
-            'gw diag requires Windows (uses msvcrt for keyboard input)')
-
     enable_vt_colors()
     st = State(args, delays)
     print(cheatsheet())
@@ -395,22 +370,28 @@ def run(usb: USB.Unit, args, delays: Delays) -> None:
     if args.gen_tg43:
         print('TG43 auto-tracking enabled on pin 2 (threshold T%d). '
               'The d key is disabled' % pinmap.TG43_TRACK_THRESHOLD)
-    sync_density_pin(usb, st)  # make sure GW is really driving what we assume
-    recalibrate(usb, st)  # known starting position for the session
 
-    next_tick = time.monotonic()
-    while True:
-        if msvcrt.kbhit():
-            key = read_key()
-            if key is not None and not handle_key(usb, st, key):
-                break
+    # Take the keyboard before touching the drive, so a terminal that can't
+    # provide key input fails immediately rather than after a recalibrate.
+    # The context manager restores the terminal on every exit path, including
+    # Ctrl-C and an unexpected error.
+    with keyboard.Keyboard() as kb:
+        sync_density_pin(usb, st)  # make sure GW really drives what we assume
+        recalibrate(usb, st)  # known starting position for the session
 
-        now = time.monotonic()
-        if now >= next_tick:
-            print(status_line(usb, st))
-            next_tick = now + 0.5
-        else:
-            time.sleep(0.02)
+        next_tick = time.monotonic()
+        while True:
+            if kb.kbhit():
+                key = kb.read_key()
+                if key is not None and not handle_key(usb, st, key):
+                    break
+
+            now = time.monotonic()
+            if now >= next_tick:
+                print(status_line(usb, st))
+                next_tick = now + 0.5
+            else:
+                time.sleep(0.02)
 
 
 def main(argv) -> None:
