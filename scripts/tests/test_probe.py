@@ -16,7 +16,7 @@ import unittest
 from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
-    consent, core, head_count, index_sensor, markers, max_track,
+    consent, core, double_step, head_count, index_sensor, markers, max_track,
     max_track_write, multi_speed, pin34, profile, spin_up, trk0)
 
 
@@ -1053,6 +1053,115 @@ class TestMultiSpeed(unittest.TestCase):
         import json
         json.dumps(multi_speed.interpret(0.200, 0.1667).as_dict())
         json.dumps(multi_speed.interpret(None, None).as_dict())
+
+
+def pairs_reading(difference, structure=0.70):
+    return [double_step.Pair(lo, hi, structure, structure, difference)
+            for lo, hi in double_step.SAMPLE_PAIRS]
+
+
+class TestDoubleStep(unittest.TestCase):
+    """Whether one written track covers two of the drive's cylinders."""
+
+    def test_adjacent_cylinders_differing_means_no_double_step(self):
+        # Measured on written test tracks: 0.429, 0.431, 0.432.
+        result = double_step.interpret(pairs_reading(0.430))
+        self.assertEqual(result.status, double_step.MATCHED)
+        self.assertFalse(result.double_step)
+        self.assertTrue(result.ok)
+
+    def test_adjacent_cylinders_identical_means_double_step(self):
+        # Measured with each pair written identically: 0.003, 0.002, 0.002.
+        result = double_step.interpret(pairs_reading(0.002))
+        self.assertEqual(result.status, double_step.HALF_PITCH)
+        self.assertTrue(result.double_step)
+
+    def test_a_blank_disk_answers_nothing_rather_than_wrongly(self):
+        # THE false positive. Every cylinder of a blank disk reads alike, so
+        # a naive comparison calls it half-pitch media. Measured structure on
+        # blank tracks was 0.01 against 0.70 for written data.
+        blank = [double_step.Pair(lo, hi, 0.01, 0.01, 0.001)
+                 for lo, hi in double_step.SAMPLE_PAIRS]
+        result = double_step.interpret(blank)
+        self.assertEqual(result.status, double_step.NO_DATA)
+        self.assertIsNone(result.double_step)
+        self.assertFalse(result.ok)
+
+    def test_one_blank_track_in_a_pair_disqualifies_the_pair(self):
+        half = [double_step.Pair(4, 5, 0.70, 0.01, 0.9)]
+        self.assertFalse(half[0].comparable)
+        self.assertEqual(double_step.interpret(half).status,
+                         double_step.NO_DATA)
+
+    def test_pairs_disagreeing_are_not_forced_to_an_answer(self):
+        mixed = [double_step.Pair(4, 5, 0.7, 0.7, 0.002),
+                 double_step.Pair(8, 9, 0.7, 0.7, 0.430)]
+        result = double_step.interpret(mixed)
+        self.assertEqual(result.status, double_step.UNCLEAR)
+        self.assertIsNone(result.double_step)
+
+    def test_a_difference_between_the_thresholds_is_not_an_answer(self):
+        self.assertIsNone(double_step.Pair(4, 5, 0.7, 0.7, 0.10).verdict)
+
+    def test_informative_pairs_carry_a_blank_one(self):
+        # One unusable pair must not veto the pairs that did work.
+        mixed = [double_step.Pair(4, 5, 0.01, 0.01, None),
+                 double_step.Pair(8, 9, 0.7, 0.7, 0.430)]
+        self.assertEqual(double_step.interpret(mixed).status,
+                         double_step.MATCHED)
+
+    def test_no_pairs_is_an_error(self):
+        with self.assertRaises(error.Fatal):
+            double_step.interpret([])
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(double_step.interpret(pairs_reading(0.430)).as_dict())
+
+
+class TestDoubleStepSignatures(unittest.TestCase):
+    """The comparison itself, on synthetic segment counts."""
+
+    def test_structure_separates_blank_from_written(self):
+        self.assertLess(double_step.structure([100] * 200),
+                        double_step.STRUCTURE_MIN)
+        varied = [100 + (n % 50) for n in range(200)]
+        self.assertGreater(double_step.structure(varied),
+                           double_step.STRUCTURE_MIN)
+
+    def test_structure_of_nothing_is_zero(self):
+        self.assertEqual(double_step.structure([]), 0.0)
+        self.assertEqual(double_step.structure([0] * 10), 0.0)
+
+    def test_identical_signatures_differ_by_nothing(self):
+        counts = [100 + (n % 37) for n in range(200)]
+        self.assertEqual(double_step.difference(counts, counts), 0.0)
+
+    def test_different_signatures_differ_measurably(self):
+        # Blocks of differing density, out of phase between the two tracks.
+        # Comes to 0.4, which is about what two genuinely different written
+        # tracks measured at (0.429 to 0.432).
+        a = [120 if (n // 10) % 2 == 0 else 80 for n in range(200)]
+        b = [120 if (n // 10) % 2 == 1 else 80 for n in range(200)]
+        self.assertGreater(double_step.difference(a, b),
+                           double_step.DIFFERENT_MIN)
+        self.assertAlmostEqual(double_step.difference(a, b), 0.4, places=2)
+
+    def test_mismatched_lengths_are_an_error(self):
+        with self.assertRaises(error.Fatal):
+            double_step.difference([1, 2, 3], [1, 2])
+
+    def test_sample_pairs_are_even_aligned(self):
+        # A wide track covers cylinders 2n and 2n+1, so a pair starting on an
+        # odd cylinder straddles two of them and would show a difference on
+        # exactly the media this probe exists to detect.
+        for lower, upper in double_step.SAMPLE_PAIRS:
+            self.assertEqual(lower % 2, 0)
+            self.assertEqual(upper, lower + 1)
+
+    def test_sample_pairs_fit_the_smallest_drive(self):
+        for _, upper in double_step.SAMPLE_PAIRS:
+            self.assertLess(upper, 37)
 
 
 class TestConsent(unittest.TestCase):
