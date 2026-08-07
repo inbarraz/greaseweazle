@@ -32,21 +32,38 @@
 # Needs the spindle turning. On drives which take the index from a hole in
 # the media -- 5.25" among them -- it also needs a disk loaded.
 #
-# Absent pulses have several quite different causes. Three were measured on a
+# Absent pulses have several quite different causes. Four were measured on a
 # 5.25" drive to find out which are separable, and the answer was humbling:
 #
-#                             pin 8 INDEX      pin 34   pin 28   flux
-#     disk loaded, normal     pulsing, 1.7%    high     high     688k
-#     disk loaded, INVERTED   never asserted   LOW      LOW      ZERO
-#     no disk at all          never asserted   LOW      high     ZERO
+#                             pin 8 INDEX      pin 28   flux
+#     disk loaded, normal     pulsing, 1.7%    high     688k
+#     disk loaded, INVERTED   never asserted   LOW      ZERO
+#     index hole TAPED OVER   never asserted   high     ZERO
+#     no disk at all          never asserted   high     ZERO
 #
-# The inverted disk was DIRECTLY OBSERVED SPINNING, and still returned no
-# flux -- checked at four cylinders on both heads, zero throughout. So the
-# drive is not failing to turn it; it is refusing to read it. Pin 34 puts the
-# drive in the same state as an empty drive, and on many 5.25" drives READY
-# derives from seeing index pulses while the read output is gated on READY.
-# No index hole in view, therefore not ready, therefore no read data, however
-# fast the disk spins.
+# Pin 34 is deliberately absent from that table. It read low in every one of
+# these captures, and an earlier reading of high for a normal disk turned out
+# to have been taken after a run which stepped the head hundreds of times.
+# Pin 34 is DISK-CHANGE on this drive: it latches low when the disk is
+# changed and clears on the first step with a disk loaded -- confirmed, one
+# step took it from 100% low to 0%. So it reports nothing about readiness,
+# and the apparent correlation was an artefact of comparing captures taken
+# under different conditions.
+#
+# The inverted disk was DIRECTLY OBSERVED SPINNING and still returned no flux.
+# The taped-over row then settled why, as a controlled experiment: same disk,
+# same orientation, write-protect notch still in view, spinning as before, and
+# the ONLY thing changed was a piece of tape over the index hole. Flux went
+# from 688,000 transitions to zero, at three cylinders on both heads.
+#
+# So the drive is not failing to turn these disks, it is refusing to read
+# them. READY here derives from seeing index pulses, and the read output is
+# gated on READY: no index hole in view, therefore never ready, therefore no
+# data at all, however fast the disk spins and however healthy the media.
+#
+# Which means a covered or damaged index hole is not a minor complaint on
+# this drive -- it takes the disk from perfectly readable to entirely
+# unreadable. Worth saying plainly to anyone who meets it.
 #
 # Note pin 28 DOES separate the two -- an inverted disk hides its write-protect
 # notch, so it reads protected, while an empty drive reads unprotected. The
@@ -67,29 +84,31 @@
 # another drive must check the media first.
 #
 # ALL OF THIS IS ONE DRIVE. The gating is a behaviour of that drive, not a
-# law, and the whole three-way diagnosis turns on it. Worth repeating on other
-# drives, earlier ones especially -- a 360k 5.25" of the era before READY was
-# commonly implemented may well hand over flux from an inverted disk, which
-# would make the loaded-but-no-index case reachable and separable rather than
-# the dead end it appears to be here. The decisive experiment needs no second
-# drive either: tape over the index hole of a correctly loaded disk. If flux
-# still comes back, the read output is not gated on index.
+# law, and the whole diagnosis turns on it. Worth repeating on other drives,
+# earlier ones especially -- a 360k 5.25" of the era before READY was commonly
+# implemented may well hand over flux from a disk whose index hole is hidden,
+# which would make the loaded-but-no-index case reachable and separable rather
+# than the dead end it is here.
 #
 # Two further ideas were tried and abandoned. Sampling pin 8 statically looked
 # promising and distinguishes nothing, because the drive holds the interface
-# line inactive whatever its own detector sees. Pin 34 does differ from the
-# normal case, but it is DISK-CHANGE on some drives and READY on others, so it
-# cannot be leaned on until that is established separately.
+# line inactive whatever its own detector sees. Pin 34 looked like it tracked
+# readiness and does not; see above.
 #
-# So no index plus no flux means only that nothing is turning under the head,
-# and the report must say that rather than announce an empty drive: telling
-# somebody their drive is empty when their disk is merely in backwards is
-# worse than admitting the two look alike.
+# So no index plus no flux means only that the drive will not read whatever is
+# in there -- NOT that nothing is turning, which the taped disk disproved by
+# spinning throughout. The report must say that rather than announce an empty
+# drive: telling somebody their drive is empty when their disk is merely in
+# backwards, or has a damaged index hole, is worse than admitting that from
+# out here the cases look alike.
 #
-# No index WITH flux is a different matter -- something is turning and being
-# read, so the index hole itself is the problem: taped over, or a drive with
-# no index sensor at all, as Apple 5.25" drives have none. That branch is
-# reasoned, not measured; neither case could be staged here.
+# No index WITH flux is a different matter -- something is being read, so the
+# index hole itself is the problem rather than the drive's willingness. That
+# branch is UNREACHABLE on a drive which gates reads the way this one does:
+# the taped-hole case proved it, arriving with zero flux rather than the flux
+# the branch expects. It is kept because a drive which does NOT gate, or one
+# with no index sensor at all as Apple 5.25" drives have, should reach it.
+# Nothing here has ever produced it.
 
 import statistics
 from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
@@ -108,7 +127,7 @@ needs_motor = True
 # Outcomes.
 OK = 'ok'                        # One steady pulse per revolution.
 ABSENT = 'absent'                # No pulses, and no way to tell why.
-NOT_SPINNING = 'not-spinning'    # No pulses and no flux: nothing readable.
+NOT_READABLE = 'not-readable'    # No pulses and no flux: drive will not read.
 NO_INDEX_HOLE = 'no-index-hole'  # No pulses but flux present: media is there.
 SPURIOUS = 'spurious'            # Extra pulses: some gaps far too short.
 DROPPED = 'dropped'              # Missed pulses: some gaps a multiple too long.
@@ -171,7 +190,7 @@ class Result(NamedTuple):
             out('  Present and steady.')
         elif self.status == ABSENT:
             out('  NO INDEX SIGNAL.')
-        elif self.status == NOT_SPINNING:
+        elif self.status == NOT_READABLE:
             out('  No readable disk in the drive.')
         elif self.status == NO_INDEX_HOLE:
             out('  NO INDEX SIGNAL, but a disk is loaded.')
@@ -205,13 +224,16 @@ def interpret(intervals: Sequence[float],
     if not intervals:
         if flux_seen is False:
             return Result(
-                NOT_SPINNING,
+                NOT_READABLE,
                 'No index pulses and no flux at all, so there is nothing '
                 'here the drive is willing to read. Either the drive is '
-                'empty, or a disk is loaded that it refuses to read -- an upside-down disk does exactly this: it spins, '
-                'but with no index hole in view the drive never comes ready '
-                'and gates its read output. Check a disk is loaded the right '
-                'way up, then run this again.')
+                'empty, or a disk is loaded whose index hole it cannot see '
+                '-- upside down, or taped or damaged over. Measured on one '
+                'drive: covering the index hole of a healthy disk took it '
+                'from 688,000 flux transitions to none, because the drive '
+                'gates its read output until index pulses arrive. Check a '
+                'disk is loaded the right way up with its index hole clear, '
+                'then run this again.')
         if flux_seen is True:
             return Result(
                 NO_INDEX_HOLE,

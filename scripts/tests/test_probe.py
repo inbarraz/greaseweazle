@@ -469,17 +469,20 @@ class TestIndexSensor(unittest.TestCase):
             self.assertEqual(result.status, index_sensor.OK)
             self.assertAlmostEqual(result.rpm, 60.0 / period, places=3)
 
-    def test_no_pulses_and_no_flux_means_nothing_readable(self):
+    def test_no_pulses_and_no_flux_means_the_drive_will_not_read(self):
         # Measured: an empty drive and an upside-down disk both return zero
         # transitions and zero pulses, so this must NOT claim the drive is
         # empty -- a disk in backwards reads identically. The inverted disk
         # was observed spinning; the drive gates its read output when it is
         # not ready, so "no flux" is not evidence of "not turning".
         result = index_sensor.interpret([], flux_seen=False)
-        self.assertEqual(result.status, index_sensor.NOT_SPINNING)
+        self.assertEqual(result.status, index_sensor.NOT_READABLE)
         self.assertIsNone(result.period)
         self.assertFalse(result.ok)
-        self.assertIn('upside-down', result.detail)
+        # Must point at the index hole, which is the actionable cause, and
+        # must not claim the disk is not turning: measured, a taped-over
+        # index hole stops the flux dead while the disk spins normally.
+        self.assertIn('index hole', result.detail)
         self.assertNotIn('not spinning', result.detail)
 
     def test_no_pulses_but_flux_points_at_the_index_hole(self):
