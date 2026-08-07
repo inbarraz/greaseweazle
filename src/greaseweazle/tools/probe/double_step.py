@@ -302,8 +302,11 @@ def interpret(pairs: Sequence[Pair]) -> Result:
 def _transitions(usb: USB.Unit, cylinder: int) -> List[float]:
     """Transition times in microseconds from the index pulse, one revolution."""
     usb.seek(cylinder, 0, check_trk0=False)
-    # The first read after a seek catches the head still settling and comes
-    # back short; measured at about 30% low. Thrown away.
+    # A discarded read after each seek. It was added believing the first
+    # read came back short, which turned out to be an artifact of counting a
+    # rotational-phase-dependent window: counted per revolution there is no
+    # shortfall at all. Kept as cheap insurance for drives which genuinely do
+    # need a moment, not for the reason it was written.
     usb.read_track(revs=1)
     flux = usb.read_track(revs=1)
     error.check(len(flux.index_list) >= 2,

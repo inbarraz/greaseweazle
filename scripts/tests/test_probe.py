@@ -17,8 +17,8 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, double_step, head_count, index_sensor, markers, max_track,
-    max_track_write, multi_speed, pin34, profile, spin_up, trk0,
-    write_verify)
+    max_track_write, multi_speed, pin34, profile, spin_up, step_timing,
+    trk0, write_verify)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -1288,6 +1288,101 @@ class TestWriteVerify(unittest.TestCase):
     def test_result_is_json_shaped(self):
         import json
         json.dumps(write_verify.interpret(written_back(*([0.0] * 12))).as_dict())
+
+
+def trials(*pairs):
+    return [step_timing.Trial(v, ok) for v, ok in pairs]
+
+
+class TestStepTiming(unittest.TestCase):
+    """Results here belong to the drive measured and to nothing else."""
+
+    def test_the_smallest_value_that_held_is_the_answer(self):
+        # Measured on the bench drive: 10000 held, 200 did not, and the
+        # bisection closed on about 1650.
+        got = step_timing.minimum_passing(
+            trials((10000, True), (200, False), (2650, True),
+                   (1425, False), (1654, True)))
+        self.assertEqual(got, 1654)
+
+    def test_nothing_holding_is_no_answer(self):
+        self.assertIsNone(step_timing.minimum_passing(
+            trials((10000, False), (200, False))))
+
+    def test_contradictions_are_caught_rather_than_averaged(self):
+        # More time cannot make stepping worse. A drive which fails at a
+        # generous setting and holds at a tight one has not been measured.
+        found = step_timing.contradictions(
+            trials((5000, False), (1000, True)))
+        self.assertEqual(found, [(1000, 5000)])
+
+    def test_an_orderly_search_contradicts_nothing(self):
+        self.assertEqual(step_timing.contradictions(
+            trials((10000, True), (2650, True), (1425, False))), [])
+
+    def test_both_measured(self):
+        result = step_timing.interpret(
+            trials((10000, True), (1654, True), (1425, False)),
+            trials((15, True), (4, True), (2, False)), 10000, 15)
+        self.assertEqual(result.status, step_timing.OK)
+        self.assertEqual(result.step_us, 1654)
+        self.assertEqual(result.settle_ms, 4)
+        self.assertTrue(result.ok)
+
+    def test_no_settle_requirement_says_so(self):
+        # The bench drive read correctly with no settle delay at all. The
+        # floor must be reported as a finding, not as a number to copy.
+        result = step_timing.interpret(
+            trials((10000, True), (1654, True)),
+            trials((15, True), (step_timing.MIN_SETTLE_MS, True)), 10000, 15)
+        self.assertEqual(result.status, step_timing.OK)
+        self.assertEqual(result.settle_ms, step_timing.MIN_SETTLE_MS)
+        self.assertIn('no settle requirement', result.detail)
+
+    def test_a_drive_with_no_margin_at_its_own_setting(self):
+        result = step_timing.interpret(trials((10000, False)), [])
+        self.assertEqual(result.status, step_timing.NO_MARGIN)
+        self.assertIsNone(result.step_us)
+        self.assertFalse(result.ok)
+
+    def test_erratic_trials_are_refused(self):
+        result = step_timing.interpret(
+            trials((10000, True), (5000, False), (1000, True)), [])
+        self.assertEqual(result.status, step_timing.NO_MARGIN)
+        self.assertIn('contradict', result.detail)
+        self.assertFalse(result.ok)
+
+    def test_step_measured_without_settle(self):
+        result = step_timing.interpret(
+            trials((10000, True), (1654, True)), [], 10000, 15)
+        self.assertEqual(result.status, step_timing.STEP_ONLY)
+        self.assertEqual(result.step_us, 1654)
+        self.assertIsNone(result.settle_ms)
+
+    def test_no_trials_is_an_error(self):
+        with self.assertRaises(error.Fatal):
+            step_timing.interpret([], [])
+
+    def test_the_settle_bar_clears_the_noise_in_a_reread(self):
+        # Two reads of one track shared 89.7% to 97.4% here, so a bar at 85%
+        # failed by luck and reported a settle requirement on a drive with
+        # none. Different tracks share about 56%, which must still fail.
+        self.assertLess(step_timing.SETTLE_MATCH, 0.897)
+        self.assertGreater(step_timing.SETTLE_MATCH, 0.70)
+
+    def test_travel_fits_the_smallest_drive(self):
+        self.assertLess(step_timing.TRAVEL, 37)
+
+    def test_a_candidate_must_hold_more_than_once(self):
+        # A marginal setting passes once by luck, and the whole point is to
+        # find where reliability ends.
+        self.assertGreater(step_timing.ATTEMPTS, 1)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(step_timing.interpret(
+            trials((10000, True), (1654, True)),
+            trials((15, True), (0, True)), 10000, 15).as_dict())
 
 
 class TestConsent(unittest.TestCase):
