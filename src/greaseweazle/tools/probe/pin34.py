@@ -24,12 +24,17 @@
 # The hole in it is a latch that was ALREADY clear when the probe started,
 # from any earlier stepping in the session. Then the line reads clear both
 # times, which is also what a READY line looks like on a drive that is not
-# ready. Knowing whether a readable disk is loaded closes that: with one
-# spinning, a READY line would be asserted, so a line sitting clear across
-# both samples is not READY and the drive is a DISK-CHANGE one whose latch
-# had already been cleared. That is inference rather than observation, so it
-# is reported as indeterminate with the way to settle it -- eject and
-# reinsert the disk, which sets the latch, and run again.
+# ready. Knowing whether a readable disk is loaded rules READY out -- with one
+# spinning it would be asserted -- but two causes remain: a latch already
+# cleared, or a drive which does not drive pin 34 at all. The second is not
+# hypothetical: a 360k drive on this bench read clear on a freshly inserted
+# disk with nothing having stepped, which leaves only "not driven". Disk-
+# change arrived with the later high-density drives and plenty of earlier
+# ones simply leave the line alone.
+#
+# Both are reported as indeterminate, with the way to separate them: reinsert
+# the disk and run this probe alone before anything steps. Clear even then
+# means the line is not driven.
 #
 # Hence the dependency on the index sensor: without a disk the drive will
 # read, none of the above holds. A DISK-CHANGE latch cannot be cleared with
@@ -185,13 +190,15 @@ def interpret(before: float, after: float) -> Result:
 
     return Result(
         INDETERMINATE,
-        'The line was clear before and after stepping. With a disk loaded '
-        'and spinning a ready signal would be asserted, so this is most '
-        'likely a disk-change latch that earlier stepping had already '
-        'cleared -- but that is inference, not measurement. Any probe which '
-        'moved the head first will have cleared it, as will any earlier run. '
-        'Eject and reinsert the disk to set the latch, then run this probe '
-        'on its own for a definite answer.', before, after)
+        'The line was clear before and after stepping, which leaves two '
+        'causes. Either it is a disk-change latch that earlier stepping had '
+        'already cleared -- any probe which moved the head first will have '
+        'done so, as will any earlier run -- or the drive does not drive pin '
+        '34 at all, which is common on drives predating disk-change. It is '
+        'not READY: with a disk loaded and spinning that would be asserted. '
+        'To tell the two apart, eject and reinsert the disk and run this '
+        'probe on its own before anything steps. If it reads clear even '
+        'then, the line is not driven.', before, after)
 
 
 def _sample(usb: USB.Unit, seconds: float = SAMPLE_SECONDS) -> float:

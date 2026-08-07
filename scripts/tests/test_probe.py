@@ -1055,8 +1055,8 @@ class TestMultiSpeed(unittest.TestCase):
         json.dumps(multi_speed.interpret(None, None).as_dict())
 
 
-def pairs_reading(difference, structure=0.70):
-    return [double_step.Pair(lo, hi, structure, structure, difference)
+def pairs_reading(similarity, variety=0.62):
+    return [double_step.Pair(lo, hi, variety, variety, similarity)
             for lo, hi in double_step.SAMPLE_PAIRS]
 
 
@@ -1064,23 +1064,26 @@ class TestDoubleStep(unittest.TestCase):
     """Whether one written track covers two of the drive's cylinders."""
 
     def test_adjacent_cylinders_differing_means_no_double_step(self):
-        # Measured on written test tracks: 0.429, 0.431, 0.432.
-        result = double_step.interpret(pairs_reading(0.430))
-        self.assertEqual(result.status, double_step.MATCHED)
-        self.assertFalse(result.double_step)
-        self.assertTrue(result.ok)
+        # Measured on a formatted 360k disk in its own drive: 53.6% to 60.3%
+        # of transitions shared, which is the chance rate rather than any
+        # similarity.
+        for measured in (0.536, 0.584, 0.603):
+            result = double_step.interpret(pairs_reading(measured))
+            self.assertEqual(result.status, double_step.MATCHED, measured)
+            self.assertFalse(result.double_step)
 
     def test_adjacent_cylinders_identical_means_double_step(self):
-        # Measured with each pair written identically: 0.003, 0.002, 0.002.
-        result = double_step.interpret(pairs_reading(0.002))
+        # The same track re-read scored 94.9%; half-pitch media puts the same
+        # track under both cylinders and should score alike.
+        result = double_step.interpret(pairs_reading(0.949))
         self.assertEqual(result.status, double_step.HALF_PITCH)
         self.assertTrue(result.double_step)
 
     def test_a_blank_disk_answers_nothing_rather_than_wrongly(self):
-        # THE false positive. Every cylinder of a blank disk reads alike, so
-        # a naive comparison calls it half-pitch media. Measured structure on
-        # blank tracks was 0.01 against 0.70 for written data.
-        blank = [double_step.Pair(lo, hi, 0.01, 0.01, 0.001)
+        # THE false positive. Blank media reads as a regular grid, so two
+        # blank tracks match perfectly and a naive comparison calls it
+        # half-pitch. Variety is zero on a grid and 0.62 on real data.
+        blank = [double_step.Pair(lo, hi, 0.0, 0.0, 1.0)
                  for lo, hi in double_step.SAMPLE_PAIRS]
         result = double_step.interpret(blank)
         self.assertEqual(result.status, double_step.NO_DATA)
@@ -1088,25 +1091,34 @@ class TestDoubleStep(unittest.TestCase):
         self.assertFalse(result.ok)
 
     def test_one_blank_track_in_a_pair_disqualifies_the_pair(self):
-        half = [double_step.Pair(4, 5, 0.70, 0.01, 0.9)]
+        half = [double_step.Pair(4, 5, 0.62, 0.0, 1.0)]
         self.assertFalse(half[0].comparable)
         self.assertEqual(double_step.interpret(half).status,
                          double_step.NO_DATA)
 
     def test_pairs_disagreeing_are_not_forced_to_an_answer(self):
-        mixed = [double_step.Pair(4, 5, 0.7, 0.7, 0.002),
-                 double_step.Pair(8, 9, 0.7, 0.7, 0.430)]
+        mixed = [double_step.Pair(4, 5, 0.62, 0.62, 0.95),
+                 double_step.Pair(8, 9, 0.62, 0.62, 0.56)]
         result = double_step.interpret(mixed)
         self.assertEqual(result.status, double_step.UNCLEAR)
         self.assertIsNone(result.double_step)
 
-    def test_a_difference_between_the_thresholds_is_not_an_answer(self):
-        self.assertIsNone(double_step.Pair(4, 5, 0.7, 0.7, 0.10).verdict)
+    def test_a_similarity_between_the_thresholds_is_not_an_answer(self):
+        between = (double_step.SAME_MIN + double_step.DIFFERENT_MAX) / 2
+        self.assertIsNone(double_step.Pair(4, 5, 0.62, 0.62, between).verdict)
+
+    def test_data_that_lands_between_thresholds_is_not_called_absent(self):
+        # Distinct from having nothing to compare: there WAS data. Saying
+        # "nothing on the disk" would send someone hunting for a disk fault
+        # that is not there.
+        between = (double_step.SAME_MIN + double_step.DIFFERENT_MAX) / 2
+        result = double_step.interpret(pairs_reading(between))
+        self.assertEqual(result.status, double_step.UNCLEAR)
+        self.assertNotIn('blank', result.detail)
 
     def test_informative_pairs_carry_a_blank_one(self):
-        # One unusable pair must not veto the pairs that did work.
-        mixed = [double_step.Pair(4, 5, 0.01, 0.01, None),
-                 double_step.Pair(8, 9, 0.7, 0.7, 0.430)]
+        mixed = [double_step.Pair(4, 5, 0.0, 0.0, None),
+                 double_step.Pair(8, 9, 0.62, 0.62, 0.56)]
         self.assertEqual(double_step.interpret(mixed).status,
                          double_step.MATCHED)
 
@@ -1116,40 +1128,45 @@ class TestDoubleStep(unittest.TestCase):
 
     def test_result_is_json_shaped(self):
         import json
-        json.dumps(double_step.interpret(pairs_reading(0.430)).as_dict())
+        json.dumps(double_step.interpret(pairs_reading(0.56)).as_dict())
 
 
-class TestDoubleStepSignatures(unittest.TestCase):
-    """The comparison itself, on synthetic segment counts."""
+class TestDoubleStepComparison(unittest.TestCase):
+    """The comparison itself, on synthetic transition times."""
 
-    def test_structure_separates_blank_from_written(self):
-        self.assertLess(double_step.structure([100] * 200),
-                        double_step.STRUCTURE_MIN)
-        varied = [100 + (n % 50) for n in range(200)]
-        self.assertGreater(double_step.structure(varied),
-                           double_step.STRUCTURE_MIN)
+    def test_variety_separates_blank_from_real_data(self):
+        # Blank media reads as a regular grid of synthesised flux.
+        grid = [n * 1.25 for n in range(2000)]
+        self.assertLess(double_step.variety(grid), double_step.VARIETY_MIN)
+        mixed, t = [], 0.0
+        for n in range(2000):
+            t += (2, 3, 4)[n % 3]
+            mixed.append(t)
+        self.assertGreater(double_step.variety(mixed),
+                           double_step.VARIETY_MIN)
 
-    def test_structure_of_nothing_is_zero(self):
-        self.assertEqual(double_step.structure([]), 0.0)
-        self.assertEqual(double_step.structure([0] * 10), 0.0)
+    def test_variety_of_almost_nothing_is_zero(self):
+        self.assertEqual(double_step.variety([]), 0.0)
+        self.assertEqual(double_step.variety([1.0, 2.0]), 0.0)
 
-    def test_identical_signatures_differ_by_nothing(self):
-        counts = [100 + (n % 37) for n in range(200)]
-        self.assertEqual(double_step.difference(counts, counts), 0.0)
+    def test_a_track_is_identical_to_itself(self):
+        times, t = [], 0.0
+        for n in range(20000):
+            t += (2, 3, 4)[(n * 7) % 3]
+            times.append(t)
+        self.assertGreater(double_step.similarity(times, times),
+                           double_step.SAME_MIN)
 
-    def test_different_signatures_differ_measurably(self):
-        # Blocks of differing density, out of phase between the two tracks.
-        # Comes to 0.4, which is about what two genuinely different written
-        # tracks measured at (0.429 to 0.432).
-        a = [120 if (n // 10) % 2 == 0 else 80 for n in range(200)]
-        b = [120 if (n // 10) % 2 == 1 else 80 for n in range(200)]
-        self.assertGreater(double_step.difference(a, b),
-                           double_step.DIFFERENT_MIN)
-        self.assertAlmostEqual(double_step.difference(a, b), 0.4, places=2)
+    def test_thresholds_clear_the_measured_values(self):
+        # 94.9% for the same track, 53.6% to 60.3% for different ones. The
+        # bar for "different" sits above the chance rate, not near zero:
+        # transitions coincide often by luck at these densities.
+        self.assertLess(double_step.SAME_MIN, 0.949)
+        self.assertGreater(double_step.DIFFERENT_MAX, 0.603)
+        self.assertLess(double_step.DIFFERENT_MAX, double_step.SAME_MIN)
 
-    def test_mismatched_lengths_are_an_error(self):
-        with self.assertRaises(error.Fatal):
-            double_step.difference([1, 2, 3], [1, 2])
+    def test_nothing_compares_to_nothing(self):
+        self.assertEqual(double_step.similarity([], [1.0, 2.0]), 0.0)
 
     def test_sample_pairs_are_even_aligned(self):
         # A wide track covers cylinders 2n and 2n+1, so a pair starting on an

@@ -41,6 +41,11 @@
 #     index hole TAPED OVER   never asserted   high     ZERO
 #     no disk at all          never asserted   high     ZERO
 #
+# Note the write-protect column, and do not lean on it. An inverted disk reads
+# protected only because its notch has swung out of view; a FLIPPY disk, cut
+# with a second notch so the reverse side can be used, reads unprotected when
+# inverted -- indistinguishable from an empty drive. Measured on one.
+#
 # Pin 34 is deliberately absent from that table. It read low in every one of
 # these captures, and an earlier reading of high for a normal disk turned out
 # to have been taken after a run which stepped the head hundreds of times.
@@ -83,12 +88,21 @@
 # reads. Every distinction drawn above collapses. Anyone repeating this on
 # another drive must check the media first.
 #
-# ALL OF THIS IS ONE DRIVE. The gating is a behaviour of that drive, not a
-# law, and the whole diagnosis turns on it. Worth repeating on other drives,
-# earlier ones especially -- a 360k 5.25" of the era before READY was commonly
-# implemented may well hand over flux from a disk whose index hole is hidden,
-# which would make the loaded-but-no-index case reachable and separable rather
-# than the dead end it is here.
+# THE GATING IS NOT UNIVERSAL, which a second drive settled. Everything above
+# came from a 5.25" HD drive. A 360k drive of the earlier era, given media
+# with no index hole in view -- a flippy disk notched on both sides but with
+# only one index hole, inserted so that hole faces away -- handed over flux
+# perfectly happily:
+#
+#                     pin 8 INDEX   pin 28   flux
+#     HD drive        none          high     ZERO       reads gated
+#     360k drive      none          high     68k-94k    reads not gated
+#
+# So a drive which does not gate reads makes the loaded-but-no-index case
+# reachable and separable, exactly as hoped, while one which does collapses
+# it into the empty-drive case. Both behaviours are real and the probe has
+# to serve both, which is why the no-flux branch names several causes rather
+# than picking one.
 #
 # Two further ideas were tried and abandoned. Sampling pin 8 statically looked
 # promising and distinguishes nothing, because the drive holds the interface
@@ -104,11 +118,11 @@
 #
 # No index WITH flux is a different matter -- something is being read, so the
 # index hole itself is the problem rather than the drive's willingness. That
-# branch is UNREACHABLE on a drive which gates reads the way this one does:
-# the taped-hole case proved it, arriving with zero flux rather than the flux
-# the branch expects. It is kept because a drive which does NOT gate, or one
-# with no index sensor at all as Apple 5.25" drives have, should reach it.
-# Nothing here has ever produced it.
+# branch is unreachable on a drive which gates reads: the taped-hole case
+# proved as much, arriving with zero flux rather than the flux the branch
+# expects. On a drive which does not gate it fires exactly as intended, and
+# it has now been seen doing so, on a 360k drive holding a flippy disk with
+# its single index hole facing the wrong way.
 
 import statistics
 from typing import (Any, Callable, Dict, List, NamedTuple, Optional,

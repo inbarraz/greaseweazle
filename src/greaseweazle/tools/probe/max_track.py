@@ -35,6 +35,22 @@
 # cylinder too high. Four consecutive probe cylinders cover every residue mod
 # 4, so on a drive with periodic loss at least one reading comes back clean.
 #
+# The PERIOD is drive-specific, which is why four consecutive rather than four
+# of anything. A second drive showed a period of 2, its readings alternating
+# 41, 42, 41, 42 rather than cycling through four values. Four consecutive
+# probes cover residues mod 2 and mod 4 alike.
+#
+# AND ON THAT SECOND DRIVE THIS METHOD CAME OUT A CYLINDER SHORT. It reported
+# a stop at 41 while the marker probe -- which counts no steps at all --
+# showed 40 and 41 holding their own marks and 42, 43 and 44 all holding the
+# same one, so the stop is 42. The step-loss model here says travel is the
+# stop plus some non-negative loss, so a reading BELOW the stop should be
+# impossible, and 41 was read repeatedly. Something on that drive makes the
+# count come up short and it is not understood; see the open question in the
+# task list rather than a guess here. The write confirmation exists for
+# precisely this, and it flagged the disagreement rather than either figure
+# passing silently.
+#
 # Note this measures the DRIVE, not the media: no disk is required, and none
 # should be present, since stepping repeatedly across stationary media can
 # score it.
