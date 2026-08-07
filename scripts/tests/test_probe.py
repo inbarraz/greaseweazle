@@ -16,7 +16,7 @@ import unittest
 from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
-    consent, max_track, max_track_write, trk0)
+    consent, core, max_track, max_track_write, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -310,6 +310,20 @@ class TestMarkerInterpret(unittest.TestCase):
         result = max_track_write.interpret([(79, 79), (80, 91)])
         json.dumps(result.as_dict())
 
+    def test_agreement_with_the_step_counting_method(self):
+        # Two methods with quite different failure modes reaching the same
+        # answer is the whole value of this probe, so it is recorded rather
+        # than left for the reader to compare by eye.
+        found = max_track_write.interpret([(79, 79), (80, 80), (83, 91)])
+        self.assertTrue(found._replace(stepping_answer=83).agrees)
+        self.assertFalse(found._replace(stepping_answer=84).agrees)
+
+    def test_agreement_is_unknown_without_both_answers(self):
+        found = max_track_write.interpret([(79, 79), (80, 80), (83, 91)])
+        self.assertIsNone(found.agrees)
+        inconclusive = max_track_write.interpret([(79, 79), (80, 80)])
+        self.assertIsNone(inconclusive._replace(stepping_answer=83).agrees)
+
 
 def trk0_walk(walk_to=4, home=True, away=(), returned=True):
     """Build a /TRK0 walk. 'away' lists cylinders wrongly asserting."""
@@ -327,39 +341,39 @@ class TestTrk0(unittest.TestCase):
     def test_healthy_sensor(self):
         result = trk0.interpret(*trk0_walk())
         self.assertEqual(result.status, trk0.OK)
-        self.assertTrue(result.usable)
+        self.assertTrue(result.ok)
 
     def test_stuck_asserted(self):
         # Asserted everywhere. This is the fault that would otherwise look
         # like a head which never moves.
         result = trk0.interpret(*trk0_walk(away=(1, 2, 3, 4)))
         self.assertEqual(result.status, trk0.STUCK_ASSERTED)
-        self.assertFalse(result.usable)
+        self.assertFalse(result.ok)
 
     def test_no_signal_at_home(self):
         result = trk0.interpret(*trk0_walk(home=False))
         self.assertEqual(result.status, trk0.ABSENT_AT_HOME)
-        self.assertFalse(result.usable)
+        self.assertFalse(result.ok)
 
     def test_never_re_asserts(self):
         # usb.py documents drives which do not assert /TRK0 stepping inward,
         # so this direction-dependent fault is real, not hypothetical.
         result = trk0.interpret(*trk0_walk(returned=False))
         self.assertEqual(result.status, trk0.NO_REASSERT)
-        self.assertFalse(result.usable)
+        self.assertFalse(result.ok)
 
     def test_intermittent(self):
         result = trk0.interpret(*trk0_walk(away=(2,)))
         self.assertEqual(result.status, trk0.INCONSISTENT)
-        self.assertFalse(result.usable)
+        self.assertFalse(result.ok)
 
-    def test_only_ok_is_usable(self):
+    def test_only_ok_is_trusted(self):
         # Everything downstream is gated on this, so a new status must not
         # default to being trusted.
         for status in (trk0.ABSENT_AT_HOME, trk0.STUCK_ASSERTED,
                        trk0.NO_REASSERT, trk0.INCONSISTENT):
-            self.assertFalse(trk0.Result(status, '').usable, status)
-        self.assertTrue(trk0.Result(trk0.OK, '').usable)
+            self.assertFalse(trk0.Result(status, '').ok, status)
+        self.assertTrue(trk0.Result(trk0.OK, '').ok)
 
     def test_result_is_json_shaped(self):
         import json
@@ -377,53 +391,59 @@ class TestTrk0(unittest.TestCase):
 class TestProbeSelection(unittest.TestCase):
     """--only, and the dependencies it must not let you skip."""
 
-    def test_default_run_excludes_the_destructive_probe(self):
-        chosen = probe.resolve(None, write_test=False)
+    def test_default_run_excludes_destructive_probes(self):
+        chosen = [p.name for p in core.select(probe.PROBES, None)]
         self.assertIn(trk0.name, chosen)
         self.assertIn(max_track.name, chosen)
         self.assertNotIn(max_track_write.name, chosen)
 
-    def test_write_test_opts_the_destructive_probe_in(self):
-        self.assertIn(max_track_write.name,
-                      probe.resolve(None, write_test=True))
+    def test_destructive_flag_opts_them_in(self):
+        chosen = [p.name for p in
+                  core.select(probe.PROBES, None, destructive=True)]
+        self.assertIn(max_track_write.name, chosen)
 
     def test_selecting_one_probe_runs_only_it(self):
-        self.assertEqual(probe.resolve([trk0.name], False), [trk0.name])
+        chosen = [p.name for p in core.select(probe.PROBES, [trk0.name])]
+        self.assertEqual(chosen, [trk0.name])
 
     def test_dependencies_are_pulled_in(self):
         # max-track measures against /TRK0, so asking for it alone must
         # still validate the sensor, or the figure is unqualified.
-        chosen = probe.resolve([max_track.name], False)
+        chosen = [p.name for p in core.select(probe.PROBES, [max_track.name])]
         self.assertEqual(chosen, [trk0.name, max_track.name])
 
     def test_transitive_dependencies_are_pulled_in(self):
-        chosen = probe.resolve([max_track_write.name], False)
+        chosen = [p.name for p in
+                  core.select(probe.PROBES, [max_track_write.name])]
         self.assertEqual(chosen,
                          [trk0.name, max_track.name, max_track_write.name])
 
-    def test_result_is_always_in_run_order(self):
+    def test_result_is_always_in_dependency_order(self):
         # Declared order, not the order the user happened to type.
-        chosen = probe.resolve([max_track.name, trk0.name], False)
+        chosen = [p.name for p in
+                  core.select(probe.PROBES, [max_track.name, trk0.name])]
         self.assertEqual(chosen, [trk0.name, max_track.name])
 
     def test_unknown_probe_is_rejected(self):
         with self.assertRaises(error.Fatal):
-            probe.resolve(['no-such-probe'], False)
+            core.select(probe.PROBES, ['no-such-probe'])
 
-    def test_every_probe_is_listed_and_summarised(self):
-        # A probe missing from ORDER cannot be selected; one missing from
-        # SUMMARIES breaks --list-probes.
-        for name in (trk0.name, max_track.name, max_track_write.name):
-            self.assertIn(name, probe.ORDER)
-            self.assertIn(name, probe.SUMMARIES)
+    def test_every_registered_probe_meets_the_contract(self):
+        # A probe missing any of these is unselectable, unreportable, or
+        # silently exempt from the consent gate.
+        for p in probe.PROBES:
+            for attr in ('name', 'title', 'summary',
+                         'depends_on', 'destructive', 'run'):
+                self.assertTrue(hasattr(p, attr),
+                                '%s lacks %s' % (p, attr))
 
-    def test_dependencies_only_ever_point_backwards(self):
-        # A probe may depend only on ones that run before it, or resolve()
-        # would return an order that cannot be executed.
-        for name, deps in probe.DEPENDS_ON.items():
-            for dep in deps:
-                self.assertLess(probe.ORDER.index(dep), probe.ORDER.index(name),
-                                '%s depends on later probe %s' % (name, dep))
+    def test_dependencies_name_registered_probes(self):
+        names = set(p.name for p in probe.PROBES)
+        for p in probe.PROBES:
+            for dependency in p.depends_on:
+                self.assertIn(dependency, names,
+                              '%s depends on unregistered %s'
+                              % (p.name, dependency))
 
 
 class TestConsent(unittest.TestCase):

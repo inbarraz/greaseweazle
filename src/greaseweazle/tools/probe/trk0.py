@@ -37,7 +37,10 @@ from greaseweazle import usb as USB
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'trk0-sensor'
+title = 'Track 0 Sensor'
 summary = 'Whether the Track 0 sensor reports position correctly'
+depends_on: Tuple[str, ...] = ()
+destructive = False
 
 # Outcomes.
 OK = 'ok'                          # Asserts at cylinder 0, clears elsewhere.
@@ -59,18 +62,34 @@ class Result(NamedTuple):
     homeward: Tuple[Tuple[int, bool], ...] = ()
 
     @property
-    def usable(self) -> bool:
+    def ok(self) -> bool:
         '''True if measurements resting on /TRK0 can be believed.'''
         return self.status == OK
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             'status': self.status,
-            'usable': self.usable,
+            'ok': self.ok,
             'detail': self.detail,
             'outward': [[c, t] for c, t in self.outward],
             'homeward': [[c, t] for c, t in self.homeward],
         }
+
+    def report(self, out: Callable[[str], None]) -> None:
+        if self.status == OK:
+            out('  Working.')
+        elif self.status == ABSENT_AT_HOME:
+            out('  NO SIGNAL at cylinder 0.')
+        elif self.status == STUCK_ASSERTED:
+            out('  FAULTY - stuck asserted.')
+        elif self.status == NO_REASSERT:
+            out('  FAULTY - does not re-assert on return.')
+        else:
+            out('  FAULTY - intermittent.')
+        out('  (%s)' % self.detail)
+        if self.outward:
+            out('  Out:  %s' % _trace(self.outward))
+            out('  Back: %s' % _trace(self.homeward))
 
 
 def interpret(outward: List[Tuple[int, bool]],
@@ -151,10 +170,15 @@ def measure(usb: USB.Unit, walk: int = WALK_CYLINDERS) -> Result:
             pass
 
 
-def run(usb: USB.Unit, report: Callable[[str], None] = print) -> Result:
-    report('  Walking the head out to cylinder %d and back...'
-           % WALK_CYLINDERS)
-    return measure(usb)
+def _trace(samples: Tuple[Tuple[int, bool], ...]) -> str:
+    return ' '.join('%d:%s' % (cyl, 'ASSERT' if asserted else '-')
+                    for cyl, asserted in samples)
+
+
+def run(ctx) -> Result:
+    ctx.report('  Walking the head out to cylinder %d and back...'
+               % WALK_CYLINDERS)
+    return measure(ctx.usb)
 
 # Local variables:
 # python-indent: 4

@@ -31,10 +31,14 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import consent
+from greaseweazle.tools.probe import consent, max_track
 
 name = 'max-track-write'
+title = 'Max Track (write confirmation)'
 summary = 'Confirm the cylinder limit by writing and reading back markers'
+# Confirms a limit that max-track must first find.
+depends_on = ('trk0-sensor', 'max-track')
+destructive = True
 
 # Outcomes.
 OK = 'ok'                       # Found the stop.
@@ -83,6 +87,9 @@ class Result(NamedTuple):
     max_cylinder: Optional[int]
     detail: str
     readings: Tuple[Tuple[int, Optional[int]], ...] = ()
+    # What max-track concluded, so agreement between two methods with quite
+    # different failure modes can be stated rather than left to the reader.
+    stepping_answer: Optional[int] = None
 
     @property
     def cylinders(self) -> Optional[int]:
@@ -97,7 +104,46 @@ class Result(NamedTuple):
             'cylinders': self.cylinders,
             'detail': self.detail,
             'readings': [[c, m] for c, m in self.readings],
+            'stepping_answer': self.stepping_answer,
+            'agrees': self.agrees,
         }
+
+    @property
+    def agrees(self) -> Optional[bool]:
+        '''Whether the two methods reached the same answer, if both ran.'''
+        if self.status != OK or self.stepping_answer is None:
+            return None
+        return self.max_cylinder == self.stepping_answer
+
+    @property
+    def ok(self) -> bool:
+        return self.status == OK
+
+    def report(self, out: Callable[[str], None]) -> None:
+        if self.status == OK:
+            max_cylinder, cylinders = self.max_cylinder, self.cylinders
+            assert max_cylinder is not None and cylinders is not None
+            out('  %d cylinders (0-%d)' % (cylinders, max_cylinder))
+            if self.agrees is True:
+                out('  AGREES with the step-counting measurement.')
+            elif self.agrees is False:
+                # agrees is only False when both answers exist.
+                assert self.stepping_answer is not None
+                out('  DISAGREES with the step-counting measurement (%d).'
+                    % self.stepping_answer)
+                out('  Trust this one: it counts no steps, so a stalled'
+                    ' stepper cannot inflate it.')
+        elif self.status == SKIPPED:
+            out('  Not run.')
+        elif self.status == WRPROT:
+            out('  Not measured - the disk is write protected.')
+        else:
+            out('  Inconclusive.')
+        out('  (%s)' % self.detail)
+        if self.readings:
+            out('  Cylinder -> marker read back: %s'
+                % ', '.join('%d->%s' % (c, 'none' if m is None else m)
+                            for c, m in self.readings))
 
 
 def marker_us(cylinder: int, lowest: int) -> float:
@@ -180,17 +226,19 @@ def _read_marker(usb: USB.Unit, lowest: int,
     return decode_marker(median_us, lowest, highest)
 
 
-def run(usb: USB.Unit, suspected_stop: int,
-        assume_yes: bool = False,
-        prompt: Optional[Callable[[str], str]] = None,
-        report: Callable[[str], None] = print) -> Result:
+def run(ctx) -> Result:
+    # The orchestrator has already established that max-track produced a
+    # usable limit, and has already taken consent for writing.
+    stepping_answer = ctx.result(max_track).max_cylinder
+    result = confirm(ctx.usb, stepping_answer, ctx.report)
+    return result._replace(stepping_answer=stepping_answer)
+
+
+def confirm(usb: USB.Unit, suspected_stop: int,
+            report: Callable[[str], None] = print) -> Result:
     '''Confirm a suspected cylinder limit by writing markers around it.'''
 
     error.check(suspected_stop >= 0, 'suspected stop must not be negative')
-
-    if not consent.confirm('The max-track write confirmation',
-                           assume_yes=assume_yes, prompt=prompt):
-        return Result(SKIPPED, None, 'User declined the write test.')
 
     lowest = max(0, suspected_stop - WINDOW_BELOW)
     highest = suspected_stop + WINDOW_ABOVE

@@ -46,7 +46,12 @@ from greaseweazle import usb as USB
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'max-track'
+title = 'Max Track'
 summary = 'Highest cylinder the drive head can reach'
+# Head position is measured against /TRK0, so a figure taken without
+# validating that sensor would be unqualified.
+depends_on = ('trk0-sensor',)
+destructive = False
 
 # Probe outcomes.
 OK = 'ok'                    # We measured a limit.
@@ -118,6 +123,45 @@ class Result(NamedTuple):
             'observations': [list(o) for o in self.observations],
             'spread': self.spread,
         }
+
+    @property
+    def ok(self) -> bool:
+        '''True if a cylinder limit was actually pinned down.
+
+        A saturated result is a lower bound, not a limit, so probes which
+        confirm the limit must not treat it as one.
+        '''
+        return (self.status == OK and self.max_cylinder is not None
+                and not self.saturated)
+
+    def report(self, out: Callable[[str], None]) -> None:
+        if self.status == OK:
+            max_cylinder, cylinders = self.max_cylinder, self.cylinders
+            assert max_cylinder is not None and cylinders is not None
+            if self.saturated:
+                out('  At least %d cylinders (0-%d)'
+                    % (cylinders, max_cylinder))
+                out('  The head reached every cylinder attempted, so the'
+                    ' drive may go further.')
+                out('  Re-run with a higher --max-cylinder to find the stop.')
+            else:
+                out('  %d cylinders (0-%d)' % (cylinders, max_cylinder))
+                if self.observations:
+                    out('  Measured at probe cylinders %s -> travel %s'
+                        % (','.join(str(c) for c, _ in self.observations),
+                           ','.join(str(t) for _, t in self.observations)))
+        elif self.status == NO_MOVEMENT:
+            out('  UNKNOWN - the head did not move.')
+            out('  Check the drive select and step lines, and that the drive'
+                ' is powered.')
+        elif self.status == FW_LIMIT:
+            out('  UNKNOWN - the firmware would not seek that far.')
+            out('  This is a Greaseweazle firmware limit, not a drive limit.')
+        elif self.status == NO_TRK0:
+            out('  UNKNOWN - no Track 0 signal.')
+            out('  This probe measures against the Track 0 sensor, so it'
+                ' cannot report a limit without one.')
+        out('  (%s)' % self.detail)
 
 
 def reconcile(observations: List[Tuple[int, int]]) -> Tuple[int, int]:
@@ -227,8 +271,12 @@ def measure(usb: USB.Unit, probe_cylinder: int) -> Result:
         _recalibrate(usb, print)
 
 
-def run(usb: USB.Unit, max_cylinder: Optional[int] = None,
-        report: Callable[[str], None] = print) -> Result:
+def run(ctx) -> Result:
+    return search(ctx.usb, ctx.options.max_cylinder, ctx.report)
+
+
+def search(usb: USB.Unit, max_cylinder: Optional[int] = None,
+           report: Callable[[str], None] = print) -> Result:
     '''Measure the drive's cylinder limit.
 
     Two stages. First bracket the stop by working outward from a low cylinder
