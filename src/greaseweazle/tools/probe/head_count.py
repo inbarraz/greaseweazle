@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import consent, markers
+from greaseweazle.tools.probe import profile, consent, markers
 
 name = 'head-count'
 title = 'Head Count'
@@ -49,6 +49,11 @@ depends_on = ('index-sensor',)
 destructive = True
 needs_motor = True
 wears_drive = False
+
+tolerances = {
+    'read_back': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 DOUBLE = 'double-sided'      # The two heads reached different surfaces.

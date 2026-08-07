@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Sequence
 
 from greaseweazle import usb as USB
 from greaseweazle.tools import util
-from greaseweazle.tools.probe import consent, core
+from greaseweazle.tools.probe import consent, core, profile
 from greaseweazle.tools.probe import (
     head_count, index_sensor, max_track, max_track_write, pin34, spin_up,
     trk0)
@@ -21,17 +21,42 @@ from greaseweazle.tools.probe import (
 # order, dependencies, consent and reporting all come from the module itself,
 # so nothing else in this file needs to know it exists.
 #
-# Listed alphabetically; core.ordered() sorts by declared dependency, so the
-# order here carries no meaning.
+# Dependencies decide the run order; this order breaks the ties, and so is
+# not merely decorative. pin34 comes first because a disk-change latch is
+# cleared by the first step, so it has to be read before anything moves the
+# head. The rest are alphabetical.
 PROBES: Sequence[core.Probe] = (
-    head_count,     # type: ignore[assignment]
+    pin34,          # type: ignore[assignment]
+    head_count,
     index_sensor,
     max_track,
     max_track_write,
-    pin34,
     spin_up,
     trk0,
 )
+
+
+def _finish(usb: USB.Unit, args, results: Dict[str, Any]) -> None:
+    '''Assemble the profile, then save and compare as asked.'''
+
+    built = profile.build(results, name=args.name,
+                          device=profile.device_info(usb),
+                          bus=args.drive.bus.name)
+    print()
+    profile.report(built, print)
+
+    if args.save:
+        profile.save(built, args.save)
+        print('  Saved to %s' % args.save)
+
+    if args.compare:
+        earlier = profile.load(args.compare)
+        print()
+        print('Compared with %s (%s):'
+              % (args.compare, earlier.get('created', 'undated')))
+        profile.report_comparison(
+            profile.compare(earlier, built, PROBES),
+            profile.environment_changes(earlier, built), print)
 
 
 def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
@@ -52,6 +77,7 @@ def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
         core.run_all(ctx, selected)
     finally:
         results.update(ctx.as_dict())
+        _finish(usb, args, results)
 
 
 def main(argv) -> None:
@@ -82,6 +108,13 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
     parser.add_argument("--only", action="append", metavar="PROBE",
                         help="run only this probe (repeatable); probes it"
                         " depends on are run too")
+    parser.add_argument("--name", metavar="NAME",
+                        help="label for the drive being probed, recorded in"
+                        " the profile (never guessed)")
+    parser.add_argument("--save", metavar="FILE",
+                        help="write the drive profile to FILE as JSON")
+    parser.add_argument("--compare", metavar="FILE",
+                        help="compare this run against a saved profile")
     parser.add_argument("--allow-wear", action="store_true",
                         help="also run probes which wear the drive mechanism")
     parser.add_argument("--list-probes", action="store_true",

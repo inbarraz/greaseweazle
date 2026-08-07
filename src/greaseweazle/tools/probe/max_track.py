@@ -43,6 +43,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+from greaseweazle.tools.probe import profile
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'max-track'
@@ -56,6 +57,16 @@ needs_motor = False
 # Deliberately drives the head into its outer stop, repeatedly, which is the
 # only way to find where that stop is. Never run on anyone else's behalf.
 wears_drive = True
+
+# The cylinder count is the finding and is compared exactly. The spread
+# reflects how much step loss the stepper happened to show on the day, not
+# anything about the drive, so comparing it would report noise as change.
+tolerances = {
+    'spread': profile.IGNORED,
+    'observations': profile.IGNORED,
+    'probe_cylinder': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Probe outcomes.
 OK = 'ok'                    # We measured a limit.

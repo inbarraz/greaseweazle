@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import consent, markers, max_track
+from greaseweazle.tools.probe import profile, consent, markers, max_track
 
 name = 'max-track-write'
 title = 'Max Track (write confirmation)'
@@ -40,6 +40,11 @@ depends_on = ('trk0-sensor', 'max-track')
 destructive = True
 needs_motor = True
 wears_drive = False
+
+tolerances = {
+    'readings': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 OK = 'ok'                       # Found the stop.

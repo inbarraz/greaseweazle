@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+from greaseweazle.tools.probe import profile
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'trk0-sensor'
@@ -43,6 +44,13 @@ depends_on: Tuple[str, ...] = ()
 destructive = False
 needs_motor = False
 wears_drive = False
+
+# Nothing here is a measurement: the sensor either behaves or it does not.
+tolerances = {
+    'outward': profile.IGNORED,
+    'homeward': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 OK = 'ok'                          # Asserts at cylinder 0, clears elsewhere.

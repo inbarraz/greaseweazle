@@ -116,6 +116,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+from greaseweazle.tools.probe import profile
 
 name = 'index-sensor'
 title = 'Index Sensor'
@@ -124,6 +125,16 @@ depends_on: Tuple[str, ...] = ()
 destructive = False
 needs_motor = True
 wears_drive = False
+
+# Speed and jitter are measurements and move a little; the status, and
+# whether the signal is there at all, are not and must not.
+tolerances = {
+    'period_ms': profile.Tolerance(relative=0.02),
+    'rpm': profile.Tolerance(relative=0.02),
+    'jitter_pct': profile.Tolerance(absolute=0.5),
+    'intervals_ms': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 OK = 'ok'                        # One steady pulse per revolution.

@@ -59,6 +59,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+from greaseweazle.tools.probe import profile
 
 name = 'spin-up'
 title = 'Motor Spin-Up'
@@ -67,6 +68,22 @@ depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
 wears_drive = False
+
+# How these fields compare between profiles. The quantisation is the whole
+# reason this probe needs a stated tolerance: the first pulse cannot arrive
+# until the index hole comes round, so a reading is late by up to a whole
+# revolution. Anything tighter than a revolution reports a change on every
+# re-probe. 200ms covers the 166.9ms revolution measured here with room to
+# spare; a drive turning more slowly would want more.
+tolerances = {
+    'first_pulse_ms': profile.Tolerance(absolute=200.0),
+    'steady_at_ms': profile.Tolerance(absolute=200.0),
+    'period_ms': profile.Tolerance(relative=0.02),
+    'rpm': profile.Tolerance(relative=0.02),
+    'spread_ms': profile.IGNORED,
+    'readings_ms': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 OK = 'ok'                        # Timed it.

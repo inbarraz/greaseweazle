@@ -214,7 +214,13 @@ def select(probes: Sequence[Probe], only: Optional[List[str]],
         chosen = set(name for name in chosen
                      if not by_name[name].wears_drive or name in named)
 
-    return ordered([by_name[name] for name in chosen])
+    # Registry order, not set order. Iterating the set would hand ordered()
+    # its input in an order that varies between processes, since Python
+    # randomises string hashing -- so the run order, and with it a saved
+    # profile, would differ run to run for no reason. Dependencies constrain
+    # the order; the registry breaks the ties, and does so the same way every
+    # time.
+    return ordered([p for p in probes if p.name in chosen])
 
 
 def needs_motor(probes: Iterable[Probe]) -> bool:

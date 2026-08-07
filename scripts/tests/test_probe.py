@@ -17,7 +17,7 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, head_count, index_sensor, markers, max_track,
-    max_track_write, pin34, spin_up, trk0)
+    max_track_write, pin34, profile, spin_up, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -811,6 +811,18 @@ class TestPin34(unittest.TestCase):
         json.dumps(pin34.interpret(1.0, 0.0).as_dict())
         json.dumps(pin34.interpret(0.0, 0.0).as_dict())
 
+    def test_selection_order_is_the_same_every_time(self):
+        # select() once iterated a set, so the run order -- and with it a
+        # saved profile -- varied between processes for no reason.
+        once = [p.name for p in core.select(probe.PROBES, None,
+                                            destructive=True,
+                                            allow_wear=True)]
+        for _ in range(5):
+            self.assertEqual(
+                [p.name for p in core.select(probe.PROBES, None,
+                                             destructive=True,
+                                             allow_wear=True)], once)
+
     def test_runs_before_anything_that_steps_the_head(self):
         # Stepping clears a disk-change latch, so a probe which moves the
         # head first leaves this one nothing to observe and it can only
@@ -825,6 +837,147 @@ class TestPin34(unittest.TestCase):
         for stepper in steps_the_head:
             self.assertLess(order.index(pin34.name), order.index(stepper),
                             '%s steps the head before pin34 runs' % stepper)
+
+
+def a_profile(probes, when='2026-01-01T00:00:00+00:00', name=None,
+              firmware='1.6'):
+    return profile.build(probes, name=name,
+                         device={'firmware': firmware, 'sample_freq': 72e6},
+                         bus='IBM/PC', when=when)
+
+
+class TestProfile(unittest.TestCase):
+
+    def test_carries_a_timestamp_and_the_user_supplied_name(self):
+        built = a_profile({}, name='Teac A')
+        self.assertEqual(built['drive_name'], 'Teac A')
+        self.assertEqual(built['created'], '2026-01-01T00:00:00+00:00')
+        self.assertEqual(built['schema'], profile.SCHEMA_VERSION)
+
+    def test_an_unnamed_drive_is_unnamed_not_guessed(self):
+        # Naming the drive is the user's to do; nothing may infer it.
+        self.assertIsNone(a_profile({})['drive_name'])
+
+    def test_round_trips_through_a_file(self):
+        import json, tempfile, os
+        built = a_profile({'trk0-sensor': {'status': 'ok'}}, name='x')
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'p.json')
+            profile.save(built, path)
+            self.assertEqual(profile.load(path), built)
+
+    def test_rejects_a_file_that_is_not_a_profile(self):
+        import json, tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'x.json')
+            with open(path, 'w') as f:
+                json.dump({'something': 'else'}, f)
+            with self.assertRaises(error.Fatal):
+                profile.load(path)
+
+
+class TestProfileComparison(unittest.TestCase):
+
+    def test_identical_runs_show_no_changes(self):
+        one = a_profile({'trk0-sensor': {'status': 'ok', 'ok': True}})
+        two = a_profile({'trk0-sensor': {'status': 'ok', 'ok': True}})
+        self.assertEqual(profile.compare(one, two, probe.PROBES), [])
+
+    def test_a_status_change_is_reported(self):
+        one = a_profile({'trk0-sensor': {'status': 'ok'}})
+        two = a_profile({'trk0-sensor': {'status': 'stuck-asserted'}})
+        changes = profile.compare(one, two, probe.PROBES)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].kind, 'changed')
+        self.assertEqual(changes[0].field, 'status')
+
+    def test_spin_up_variation_within_a_revolution_is_not_a_change(self):
+        # The measured spread was 164ms against a 167ms revolution. Comparing
+        # this field tightly would cry wolf on every single re-probe.
+        one = a_profile({'spin-up': {'status': 'ok', 'first_pulse_ms': 750.4}})
+        two = a_profile({'spin-up': {'status': 'ok', 'first_pulse_ms': 914.7}})
+        self.assertEqual(profile.compare(one, two, probe.PROBES), [])
+
+    def test_spin_up_moving_far_more_than_a_revolution_is_a_change(self):
+        one = a_profile({'spin-up': {'status': 'ok', 'first_pulse_ms': 750.0}})
+        two = a_profile({'spin-up': {'status': 'ok', 'first_pulse_ms': 1800.0}})
+        self.assertEqual(len(profile.compare(one, two, probe.PROBES)), 1)
+
+    def test_a_skipped_probe_reads_as_not_measured_not_as_failure(self):
+        # The distinction the whole design turns on: absent must never read
+        # as degradation.
+        one = a_profile({'max-track': {'status': 'ok', 'cylinders': 84}})
+        two = a_profile({'max-track': {'status': 'skipped',
+                                       'reason': 'not approved'}})
+        changes = profile.compare(one, two, probe.PROBES)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].kind, 'not-measured')
+        self.assertIn('not measured', changes[0].describe())
+
+    def test_newly_measured_is_distinguished_too(self):
+        one = a_profile({'max-track': {'status': 'skipped', 'reason': 'x'}})
+        two = a_profile({'max-track': {'status': 'ok', 'cylinders': 84}})
+        changes = profile.compare(one, two, probe.PROBES)
+        self.assertEqual(changes[0].kind, 'newly-measured')
+
+    def test_two_skipped_runs_are_not_a_change(self):
+        one = a_profile({'max-track': {'status': 'skipped', 'reason': 'a'}})
+        two = a_profile({'max-track': {'status': 'skipped', 'reason': 'b'}})
+        self.assertEqual(profile.compare(one, two, probe.PROBES), [])
+
+    def test_probes_added_and_removed_are_named(self):
+        one = a_profile({'trk0-sensor': {'status': 'ok'}})
+        two = a_profile({'pin34': {'status': 'disk-change'}})
+        kinds = sorted(c.kind for c in profile.compare(one, two, probe.PROBES))
+        self.assertEqual(kinds, ['added', 'removed'])
+
+    def test_ignored_fields_do_not_produce_noise(self):
+        # Raw samples and prose belong in the profile but not in a diff.
+        one = a_profile({'trk0-sensor': {'status': 'ok', 'detail': 'one',
+                                         'outward': [[0, True]]}})
+        two = a_profile({'trk0-sensor': {'status': 'ok', 'detail': 'two',
+                                         'outward': [[0, False]]}})
+        self.assertEqual(profile.compare(one, two, probe.PROBES), [])
+
+    def test_a_schema_change_refuses_comparison(self):
+        one = a_profile({})
+        two = a_profile({})
+        two['schema'] = profile.SCHEMA_VERSION + 1
+        with self.assertRaises(error.Fatal):
+            profile.compare(one, two, probe.PROBES)
+
+    def test_firmware_change_is_reported_as_environment(self):
+        one = a_profile({}, firmware='1.6')
+        two = a_profile({}, firmware='1.7')
+        notes = profile.environment_changes(one, two)
+        self.assertEqual(len(notes), 1)
+        self.assertIn('Firmware', notes[0])
+
+    def test_unknown_probe_falls_back_to_exact_comparison(self):
+        # Erring towards reporting rather than towards silence.
+        one = a_profile({'mystery': {'value': 1.0}})
+        two = a_profile({'mystery': {'value': 1.000001}})
+        self.assertEqual(len(profile.compare(one, two, probe.PROBES)), 1)
+
+
+class TestTolerance(unittest.TestCase):
+
+    def test_absolute_and_relative_take_the_larger(self):
+        t = profile.Tolerance(absolute=1.0, relative=0.5)
+        self.assertTrue(t.accepts(100.0, 140.0))   # within 50%
+        self.assertTrue(t.accepts(0.5, 1.2))       # within 1.0 absolute
+        self.assertFalse(t.accepts(100.0, 200.0))
+
+    def test_exact_by_default(self):
+        self.assertFalse(profile.Tolerance().accepts(1.0, 1.0001))
+
+    def test_every_probe_declares_tolerances_for_its_own_fields(self):
+        # A probe knows which of its fields are measurements; profile.py
+        # cannot. One with none declared compares everything exactly, which
+        # is safe but noisy, so this flags the omission.
+        for p in probe.PROBES:
+            self.assertTrue(hasattr(p, 'tolerances'),
+                            '%s declares no tolerances' % p.name)
 
 
 class TestConsent(unittest.TestCase):

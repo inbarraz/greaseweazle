@@ -49,6 +49,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+from greaseweazle.tools.probe import profile
 
 name = 'pin34'
 title = 'Pin 34 Mode'
@@ -57,6 +58,13 @@ depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
 wears_drive = False
+
+# The duty figures are sampling artefacts; what pin 34 IS must match exactly.
+tolerances = {
+    'asserted_before': profile.IGNORED,
+    'asserted_after': profile.IGNORED,
+    'detail': profile.IGNORED,
+}
 
 # Outcomes.
 DISK_CHANGE = 'disk-change'      # Latched, and a step cleared it.
