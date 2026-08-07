@@ -17,7 +17,7 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, head_count, index_sensor, markers, max_track,
-    max_track_write, pin34, profile, spin_up, trk0)
+    max_track_write, multi_speed, pin34, profile, spin_up, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -978,6 +978,81 @@ class TestTolerance(unittest.TestCase):
         for p in probe.PROBES:
             self.assertTrue(hasattr(p, 'tolerances'),
                             '%s declares no tolerances' % p.name)
+
+
+class TestMultiSpeed(unittest.TestCase):
+    """Whether driving pin 2 changes the spindle speed."""
+
+    def test_one_speed_is_an_answer_not_a_failure(self):
+        # Measured on the bench drive: 166.904 and 166.900 ms. Plenty of
+        # drives are fixed-speed, and plenty use pin 2 only for write
+        # current, so this must read as a finding rather than a fault.
+        result = multi_speed.interpret(0.166904, 0.166900)
+        self.assertEqual(result.status, multi_speed.FIXED)
+        self.assertTrue(result.ok)
+
+    def test_two_speeds_are_detected(self):
+        # 300 and 360 rpm as an example only: no nominal figure is used to
+        # reach the verdict, just that the two periods differ.
+        result = multi_speed.interpret(0.200, 0.1667)
+        self.assertEqual(result.status, multi_speed.SWITCHES)
+        self.assertTrue(result.ok)
+        self.assertAlmostEqual(result.ratio, 0.200 / 0.1667, places=3)
+
+    def test_the_verdict_does_not_depend_on_the_speeds_being_familiar(self):
+        # A drive turning at rates nobody standardised still switches.
+        result = multi_speed.interpret(0.400, 0.250)
+        self.assertEqual(result.status, multi_speed.SWITCHES)
+
+    def test_ordinary_speed_variation_is_not_a_second_speed(self):
+        # A healthy drive holds its speed to well under a percent; the
+        # threshold has to sit far above that and far below a real change.
+        for jitter in (0.0001, 0.001, 0.01):
+            result = multi_speed.interpret(0.1669, 0.1669 * (1 + jitter))
+            self.assertEqual(result.status, multi_speed.FIXED, jitter)
+
+    def test_a_change_too_small_to_be_a_speed_is_reported_as_neither(self):
+        # Something moved, but nothing like the 1.2 a density change moves a
+        # spindle. Calling that "two speeds" would be as wrong as calling it
+        # "one", so it gets its own answer.
+        result = multi_speed.interpret(0.1669, 0.1669 * 1.05)
+        self.assertEqual(result.status, multi_speed.MARGINAL)
+        self.assertFalse(result.ok)
+
+    def test_the_bar_sits_below_the_300_360_pair_with_room(self):
+        # 300/360 is a ratio of 1.2. The threshold must admit it comfortably
+        # so that another genuine pair is not missed, while staying far above
+        # drive drift.
+        self.assertLess(multi_speed.SWITCH_RATIO, 1.2)
+        self.assertGreater(multi_speed.SWITCH_RATIO,
+                           multi_speed.SAME_RATIO * 1.05)
+
+    def test_the_measured_300_360_pair_is_detected(self):
+        # Recorded from the bench drive once jumpered for two speeds:
+        # 200.264 ms and 166.897 ms, a ratio of 1.200.
+        result = multi_speed.interpret(0.200264, 0.166897)
+        self.assertEqual(result.status, multi_speed.SWITCHES)
+        self.assertAlmostEqual(result.ratio, 1.200, places=3)
+
+    def test_an_unmeasurable_state_is_inconclusive(self):
+        for low, high in ((None, 0.1669), (0.1669, None), (None, None)):
+            result = multi_speed.interpret(low, high)
+            self.assertEqual(result.status, multi_speed.INCONCLUSIVE)
+            self.assertFalse(result.ok)
+            self.assertIsNone(result.ratio)
+
+    def test_reports_which_state_is_faster(self):
+        self.assertIn('high', multi_speed.interpret(0.200, 0.1667).detail)
+        self.assertIn('low', multi_speed.interpret(0.1667, 0.200).detail)
+
+    def test_nonsense_periods_are_an_error(self):
+        with self.assertRaises(error.Fatal):
+            multi_speed.interpret(0.0, 0.1669)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(multi_speed.interpret(0.200, 0.1667).as_dict())
+        json.dumps(multi_speed.interpret(None, None).as_dict())
 
 
 class TestConsent(unittest.TestCase):
