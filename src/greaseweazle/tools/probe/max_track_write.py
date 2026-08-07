@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile, consent, markers, max_track
+from greaseweazle.tools.probe import core, profile, consent, markers, max_track
 
 name = 'max-track-write'
 title = 'Max Track (write confirmation)'
@@ -39,6 +39,7 @@ summary = 'Confirm the cylinder limit by writing and reading back markers'
 depends_on = ('trk0-sensor', 'max-track')
 destructive = True
 needs_motor = True
+needs_media = core.MEDIA_SCRATCH
 wears_drive = False
 
 tolerances = {

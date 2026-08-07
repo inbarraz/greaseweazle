@@ -130,7 +130,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 
 name = 'index-sensor'
 title = 'Index Sensor'
@@ -138,6 +138,7 @@ summary = 'Whether the index signal is present and steady'
 depends_on: Tuple[str, ...] = ()
 destructive = False
 needs_motor = True
+needs_media = core.MEDIA_ANY
 wears_drive = False
 
 # Speed and jitter are measurements and move a little; the status, and

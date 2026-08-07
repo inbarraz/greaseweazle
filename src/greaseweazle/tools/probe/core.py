@@ -19,6 +19,7 @@
 #     destructive  True if it writes to the disk
 #     needs_motor  True if it needs the spindle turning
 #     wears_drive  True if running it measurably wears the mechanism
+#     needs_media  what has to be in the drive: see MEDIA_* below
 #     run(ctx)     perform the measurement, returning a Result
 #
 # and its Result satisfies the Result protocol below.
@@ -28,6 +29,41 @@ from typing import (Any, Callable, Dict, Iterable, List, NamedTuple,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
+
+
+# What a probe needs in the drive, in increasing order of demand. Probes run
+# in this order so that a session asks for as few disk changes as it can:
+# everything needing nothing runs first, then everything needing a disk, and
+# the ones which write come last, when a scratch disk is called for anyway.
+#
+# Dependencies never point the wrong way across this -- a probe needing a
+# scratch disk may depend on one needing none, but not the reverse -- so
+# ordering by demand and ordering by dependency do not fight.
+MEDIA_NONE = 'none'
+MEDIA_ANY = 'any'
+MEDIA_FORMATTED = 'formatted'
+MEDIA_SCRATCH = 'scratch'
+
+MEDIA_ORDER = (MEDIA_NONE, MEDIA_ANY, MEDIA_FORMATTED, MEDIA_SCRATCH)
+
+MEDIA_INSTRUCTIONS = {
+    MEDIA_NONE: 'No disk needed. An EMPTY drive is best: these probes step '
+                'the head repeatedly, and dragging it across a stationary '
+                'disk can score the surface.',
+    MEDIA_ANY: 'Load ANY disk the drive can read. Its contents do not '
+               'matter, but there must be one: on drives taking the index '
+               'from a hole in the media there is no index signal without.',
+    MEDIA_FORMATTED: 'Load a FORMATTED disk with data on it. A blank one '
+                     'reads alike at every cylinder, which answers some '
+                     'questions wrongly rather than not at all.',
+    MEDIA_SCRATCH: 'Load a SCRATCH disk. What follows writes to it and '
+                   'DESTROYS the contents.',
+}
+
+
+def media_rank(level: str) -> int:
+    error.check(level in MEDIA_ORDER, 'Unknown media requirement %r' % level)
+    return MEDIA_ORDER.index(level)
 
 
 class Result(Protocol):
@@ -68,6 +104,7 @@ class Probe(Protocol):
     destructive: bool
     needs_motor: bool
     wears_drive: bool
+    needs_media: str
 
     def run(self, ctx: 'Context') -> Result:
         ...
@@ -101,12 +138,33 @@ class Context:
 
     def __init__(self, usb: USB.Unit, options: Any,
                  confirm: Callable[[Probe], bool],
-                 out: Callable[[str], None] = print) -> None:
+                 out: Callable[[str], None] = print,
+                 pause: Optional[Callable[[str], Any]] = None) -> None:
         self.usb = usb
         self.options = options
         self._confirm = confirm
         self.report = out
+        self._pause = pause
         self.results: Dict[str, Result] = {}
+        # Nothing has been asked for yet, so the first probe announces
+        # whatever it needs even if that is nothing.
+        self.media: Optional[str] = None
+
+    def require_media(self, probe: Probe) -> None:
+        '''Announce what the drive needs, when it changes.
+
+        Only ever increases within a run, because probes are ordered by what
+        they demand. A probe which writes says so through the consent gate a
+        moment later, so it is announced but not paused for twice.
+        '''
+        if self.media is not None and (media_rank(probe.needs_media)
+                                       <= media_rank(self.media)):
+            return
+        self.media = probe.needs_media
+        self.report('')
+        self.report('*** %s' % MEDIA_INSTRUCTIONS[probe.needs_media])
+        if self._pause is not None and not probe.destructive:
+            self._pause('    Press Enter when the drive is ready: ')
 
     def record(self, probe: Probe, result: Result) -> None:
         self.results[probe.name] = result
@@ -143,7 +201,11 @@ def ordered(probes: Iterable[Probe]) -> List[Probe]:
     error here: it means that probe was not selected, and run_all will skip
     whatever needed it, saying so. Registry validity is checked by select().
     '''
-    probes = list(probes)
+    # By what each probe needs in the drive, so a session asks for as few
+    # disk changes as it can. Dependencies still decide the order; this only
+    # breaks the ties, and cannot fight them because a probe never depends on
+    # one needing MORE than it does.
+    probes = sorted(probes, key=lambda p: media_rank(p.needs_media))
     by_name = dict((p.name, p) for p in probes)
     state: Dict[str, str] = {}
     result: List[Probe] = []
@@ -236,6 +298,7 @@ def run_all(ctx: Context, probes: Sequence[Probe]) -> None:
     '''Run each probe, skipping any whose prerequisites did not hold.'''
 
     for probe in probes:
+        ctx.require_media(probe)
         unmet = [name for name in probe.depends_on if not ctx.ok(name)]
         if unmet:
             result: Result = Skipped(

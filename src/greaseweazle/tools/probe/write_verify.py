@@ -51,7 +51,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import consent, profile
+from greaseweazle.tools.probe import core, consent, profile
 
 name = 'write-verify'
 title = 'Write and Read Back'
@@ -59,6 +59,7 @@ summary = 'Whether a written track reads back as written'
 depends_on = ('index-sensor',)
 destructive = True
 needs_motor = True
+needs_media = core.MEDIA_SCRATCH
 wears_drive = False
 
 tolerances = {

@@ -51,7 +51,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional
 from greaseweazle import error
 from greaseweazle import usb as USB
 from greaseweazle.tools.diag.pinmap import DENSITY_SELECT_PIN
-from greaseweazle.tools.probe import index_sensor, profile
+from greaseweazle.tools.probe import core, index_sensor, profile
 
 name = 'multi-speed'
 title = 'Multi-Speed'
@@ -59,6 +59,7 @@ summary = 'Whether driving pin 2 changes the spindle speed'
 depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
+needs_media = core.MEDIA_ANY
 wears_drive = False
 
 tolerances = {

@@ -824,20 +824,54 @@ class TestPin34(unittest.TestCase):
                                              destructive=True,
                                              allow_wear=True)], once)
 
-    def test_runs_before_anything_that_steps_the_head(self):
-        # Stepping clears a disk-change latch, so a probe which moves the
-        # head first leaves this one nothing to observe and it can only
-        # report indeterminate. The order comes out right today from the
-        # dependency sort; this pins it down so a future stepping probe
-        # cannot quietly sort ahead and cost this one its answer.
+    def test_runs_before_anything_that_steps_a_loaded_disk(self):
+        # Stepping clears a disk-change latch, so this probe has to read the
+        # line before anything moves the head -- but only counting from when
+        # the disk went in, since inserting one is what sets the latch.
+        #
+        # Probes needing no disk run first and step freely; the disk arrives
+        # after them, setting the latch fresh. So the constraint is against
+        # steppers at pin34's own media level or beyond, not against every
+        # stepper. Ordering by media demand happens to serve this probe
+        # rather than fight it.
         order = [p.name for p in core.select(probe.PROBES, None,
                                              destructive=True,
                                              allow_wear=True)]
-        steps_the_head = (trk0.name, max_track.name, head_count.name,
-                          max_track_write.name)
+        steps_the_head = (trk0.name, max_track.name, double_step.name,
+                          head_count.name, max_track_write.name)
         for stepper in steps_the_head:
+            module = dict((p.name, p) for p in probe.PROBES)[stepper]
+            if core.media_rank(module.needs_media) < core.media_rank(
+                    pin34.needs_media):
+                continue        # runs before the disk is even loaded
             self.assertLess(order.index(pin34.name), order.index(stepper),
-                            '%s steps the head before pin34 runs' % stepper)
+                            '%s steps a loaded disk before pin34 runs'
+                            % stepper)
+
+    def test_probes_are_ordered_by_what_the_drive_must_hold(self):
+        # So a session asks for as few disk changes as it can: nothing, then
+        # any disk, then a formatted one, then a scratch one.
+        ranks = [core.media_rank(p.needs_media)
+                 for p in core.select(probe.PROBES, None, destructive=True,
+                                      allow_wear=True)]
+        self.assertEqual(ranks, sorted(ranks))
+
+    def test_no_probe_depends_on_one_needing_more_media(self):
+        # Ordering by media demand and ordering by dependency must not
+        # fight. They cannot, so long as this holds.
+        by_name = dict((p.name, p) for p in probe.PROBES)
+        for p in probe.PROBES:
+            for dependency in p.depends_on:
+                self.assertLessEqual(
+                    core.media_rank(by_name[dependency].needs_media),
+                    core.media_rank(p.needs_media),
+                    '%s needs %s but depends on %s which needs %s'
+                    % (p.name, p.needs_media, dependency,
+                       by_name[dependency].needs_media))
+
+    def test_every_probe_declares_what_media_it_needs(self):
+        for p in probe.PROBES:
+            self.assertIn(p.needs_media, core.MEDIA_ORDER, p.name)
 
 
 def a_profile(probes, when='2026-01-01T00:00:00+00:00', name=None,

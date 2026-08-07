@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile, consent, markers
+from greaseweazle.tools.probe import core, profile, consent, markers
 
 name = 'head-count'
 title = 'Head Count'
@@ -48,6 +48,7 @@ summary = 'Whether the drive has a second head'
 depends_on = ('index-sensor',)
 destructive = True
 needs_motor = True
+needs_media = core.MEDIA_SCRATCH
 wears_drive = False
 
 tolerances = {

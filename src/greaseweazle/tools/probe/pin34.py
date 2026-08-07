@@ -54,7 +54,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 
 name = 'pin34'
 title = 'Pin 34 Mode'
@@ -62,6 +62,7 @@ summary = 'Whether pin 34 is DISK-CHANGE or READY'
 depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
+needs_media = core.MEDIA_ANY
 wears_drive = False
 
 # The duty figures are sampling artefacts; what pin 34 IS must match exactly.

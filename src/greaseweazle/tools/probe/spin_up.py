@@ -59,7 +59,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 
 name = 'spin-up'
 title = 'Motor Spin-Up'
@@ -67,6 +67,7 @@ summary = 'How long after motor-on the drive starts delivering index'
 depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
+needs_media = core.MEDIA_ANY
 wears_drive = False
 
 # How these fields compare between profiles. The quantisation is the whole

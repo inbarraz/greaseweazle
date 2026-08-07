@@ -75,7 +75,10 @@ def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
 
     ctx = core.Context(
         usb, args,
-        confirm=lambda p: consent.confirm(p.title, assume_yes=args.yes))
+        confirm=lambda p: consent.confirm(p.title, assume_yes=args.yes),
+        # Nothing to wait for when the disk is never going to change under
+        # us, which is what --yes says: it is already approved to proceed.
+        pause=None if args.yes else input)
     try:
         core.run_all(ctx, selected)
     finally:
@@ -128,9 +131,14 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
 
     if args.list_probes:
         for p in core.ordered(PROBES):
-            notes = ([' (writes to the disk)'] if p.destructive else [])
-            notes += [' (wears the drive)'] if p.wears_drive else []
-            print('  %-18s%s%s' % (p.name, p.summary, ''.join(notes)))
+            notes = ([' (wears the drive)'] if p.wears_drive else [])
+            print('  %-18s%-10s%s%s'
+                  % (p.name, p.needs_media, p.summary, ''.join(notes)))
+        print()
+        print('The middle column is what the drive must hold. Probes run in')
+        print('that order, so a full run asks for as few disk changes as it')
+        print('can: nothing, then any disk, then a formatted one, then a')
+        print('scratch one which gets written over.')
         return
 
     # Selecting a destructive probe is itself a request to run it; the consent

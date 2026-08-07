@@ -101,7 +101,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 
 name = 'double-step'
 title = 'Double-Step'
@@ -109,6 +109,7 @@ summary = 'Whether the loaded disk needs double-stepping in this drive'
 depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
+needs_media = core.MEDIA_FORMATTED
 wears_drive = False
 
 tolerances = {

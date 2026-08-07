@@ -59,7 +59,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'max-track'
@@ -72,6 +72,7 @@ destructive = False
 needs_motor = False
 # Deliberately drives the head into its outer stop, repeatedly, which is the
 # only way to find where that stop is. Never run on anyone else's behalf.
+needs_media = core.MEDIA_NONE
 wears_drive = True
 
 # The cylinder count is the finding and is compared exactly. The spread

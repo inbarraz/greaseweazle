@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import profile
+from greaseweazle.tools.probe import core, profile
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'trk0-sensor'
@@ -43,6 +43,7 @@ summary = 'Whether the Track 0 sensor reports position correctly'
 depends_on: Tuple[str, ...] = ()
 destructive = False
 needs_motor = False
+needs_media = core.MEDIA_NONE
 wears_drive = False
 
 # Nothing here is a measurement: the sensor either behaves or it does not.
