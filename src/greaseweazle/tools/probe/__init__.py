@@ -8,7 +8,7 @@
 description = "Probe drive parameters and feature support."
 
 import sys
-from typing import Any, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 from greaseweazle import usb as USB
 from greaseweazle.tools import util
@@ -64,7 +64,7 @@ def _finish(usb: USB.Unit, args, results: Dict[str, Any]) -> None:
 
 
 def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
-          results: Dict[str, Any]) -> None:
+          motor: bool, results: Dict[str, Any]) -> None:
     """Run the selected probes, collecting results by probe name.
 
     Results are gathered into the caller's dict rather than returned, so that
@@ -79,12 +79,18 @@ def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
     # scripted run which silently wrote to a disk because nobody was there
     # to object would be the worst of both.
     if args.non_interactive:
-        confirm = lambda p: False
+        confirm = lambda writers: False
     else:
-        confirm = lambda p: consent.confirm(p.title, assume_yes=args.yes)
+        confirm = lambda writers: consent.confirm(
+            ', '.join(p.title for p in writers), assume_yes=args.yes)
+
+    def reselect() -> None:
+        usb.set_bus_type(args.drive.bus.value)
+        usb.drive_select(args.drive.unit_id)
+        usb.drive_motor(args.drive.unit_id, motor)
 
     ctx = core.Context(
-        usb, args, confirm=confirm,
+        usb, args, confirm=confirm, reselect=reselect,
         # Nothing to wait for when nobody is going to change the disk: --yes
         # has already approved proceeding, and --non-interactive says there
         # is no one to ask.
@@ -94,6 +100,31 @@ def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
     finally:
         results.update(ctx.as_dict())
         _finish(usb, args, results)
+
+
+def print_plan_to(selected: Sequence[core.Probe],
+                  out: Callable[[str], None]) -> None:
+    """What is about to run, grouped by what the drive must hold."""
+
+    out('')
+    out('This run will ask for the drive to hold, in order:')
+    shown = None
+    for probe in selected:
+        if probe.needs_media != shown:
+            shown = probe.needs_media
+            out('')
+            out('  %s' % core.MEDIA_INSTRUCTIONS[shown])
+        out('      %-18s%s%s'
+            % (probe.name, probe.summary,
+               ' [WRITES TO IT]' if probe.destructive else ''))
+    out('')
+    out('It stops and waits at each change, so the disks can be swapped.')
+    out('Anything marked as writing will ask before it does so.')
+    out('')
+
+
+def print_plan(selected: Sequence[core.Probe]) -> None:
+    print_plan_to(selected, print)
 
 
 def main(argv) -> None:
@@ -136,11 +167,20 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
                         help="compare this run against a saved profile")
     parser.add_argument("--allow-wear", action="store_true",
                         help="also run probes which wear the drive mechanism")
+    parser.add_argument("--all", action="store_true",
+                        help="run every probe: implies --allow-wear and"
+                        " --write-test")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print what would run, and what the drive must"
+                        " hold, without touching it")
     parser.add_argument("--list-probes", action="store_true",
                         help="list the available probes and exit")
     parser.description = description
     parser.prog += ' ' + argv[1]
     args = parser.parse_args(argv[2:])
+
+    if args.all:
+        args.allow_wear = args.write_test = True
 
     if args.list_probes:
         for p in core.ordered(PROBES):
@@ -169,6 +209,13 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
             print('Also running %s, which the selection depends on.'
                   % ', '.join(added))
 
+    # What the run will ask for, before it asks for anything. Somebody about
+    # to spend several minutes feeding disks to a drive should be able to
+    # collect them first, and should know which of them will be written over.
+    print_plan(selected)
+    if args.dry_run:
+        return
+
     # Asked of the probes rather than inferred from the flags: a probe which
     # needs the spindle turning says so, and the motor is switched on for the
     # whole session because that is the granularity the drive offers.
@@ -177,8 +224,9 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
     results: Dict[str, Any] = {}
     try:
         usb = util.usb_open(args.device)
-        util.with_drive_selected(lambda: probe(usb, args, selected, results),
-                                 usb, args.drive, motor=motor)
+        util.with_drive_selected(
+            lambda: probe(usb, args, selected, motor, results),
+            usb, args.drive, motor=motor)
     except USB.CmdError as err:
         print("Command Failed: %s" % err)
 

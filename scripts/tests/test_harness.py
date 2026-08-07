@@ -13,7 +13,7 @@ import fake
 from greaseweazle.tools.probe import core, max_track, trk0
 
 
-def context(usb=None, confirm=None, pause=None, **options):
+def context(usb=None, confirm=None, pause=None, reselect=None, **options):
     class Options:
         pass
     opts = Options()
@@ -22,7 +22,7 @@ def context(usb=None, confirm=None, pause=None, **options):
         setattr(opts, key, value)
     return core.Context(usb or fake.FakeUnit(), opts,
                         confirm=confirm or (lambda p: True),
-                        out=fake.Recorder(), pause=pause)
+                        out=fake.Recorder(), pause=pause, reselect=reselect)
 
 
 class TestOrchestrator(unittest.TestCase):
@@ -54,20 +54,43 @@ class TestOrchestrator(unittest.TestCase):
 
     def test_a_destructive_probe_is_not_run_without_consent(self):
         probe = fake.StubProbe('writes', destructive=True)
-        ctx = context(confirm=lambda p: False)
+        ctx = context(confirm=lambda writers: False)
         core.run_all(ctx, [probe])
         self.assertFalse(probe.ran)
         self.assertEqual(ctx.results['writes'].status, 'skipped')
 
-    def test_consent_is_asked_once_per_destructive_probe(self):
+    def test_consent_is_asked_once_for_the_whole_run(self):
+        # Three probes writing to one disk is one question, not three.
+        # Asking per probe teaches people to type Yes without reading.
         asked = []
-        probe = fake.StubProbe('writes', destructive=True)
-        ctx = context(confirm=lambda p: asked.append(p.name) or True)
-        core.run_all(ctx, [probe])
-        self.assertEqual(asked, ['writes'])
+        writers = [fake.StubProbe('w%d' % n, destructive=True)
+                   for n in range(3)]
+        ctx = context(confirm=lambda ws: asked.append([p.name for p in ws])
+                      or True)
+        core.run_all(ctx, writers)
+        self.assertEqual(len(asked), 1)
+        self.assertTrue(all(p.ran for p in writers))
+
+    def test_the_question_names_every_probe_it_covers(self):
+        asked = []
+        writers = [fake.StubProbe('w%d' % n, destructive=True)
+                   for n in range(3)]
+        ctx = context(confirm=lambda ws: asked.append([p.name for p in ws])
+                      or True)
+        core.run_all(ctx, writers)
+        self.assertEqual(asked[0], ['w0', 'w1', 'w2'])
+
+    def test_a_refusal_is_remembered_rather_than_re_litigated(self):
+        asked = []
+        writers = [fake.StubProbe('w%d' % n, destructive=True)
+                   for n in range(3)]
+        ctx = context(confirm=lambda ws: asked.append(1) or False)
+        core.run_all(ctx, writers)
+        self.assertEqual(len(asked), 1)
+        self.assertFalse(any(p.ran for p in writers))
 
     def test_a_non_destructive_probe_is_never_asked_about(self):
-        def refuse(probe):
+        def refuse(writers):
             raise AssertionError('asked about a probe which writes nothing')
         ctx = context(confirm=refuse)
         core.run_all(ctx, [fake.StubProbe('reads')])
@@ -82,6 +105,55 @@ class TestOrchestrator(unittest.TestCase):
         core.run_all(ctx, [first, second])
         self.assertEqual(sorted(ctx.results), ['first', 'second'])
         self.assertIn('status', ctx.as_dict()['second'])
+
+
+class TestAProbeFailing(unittest.TestCase):
+    """One probe meeting the unexpected must not end the run."""
+
+    def test_the_run_continues_past_a_probe_which_raises(self):
+        from greaseweazle import error as gw_error
+        bad = fake.StubProbe('bad', raises=gw_error.Fatal('no index'))
+        after = fake.StubProbe('after')
+        ctx = context()
+        core.run_all(ctx, [bad, after])
+        self.assertTrue(after.ran)
+
+    def test_the_failure_is_recorded_where_the_result_would_be(self):
+        from greaseweazle import error as gw_error
+        bad = fake.StubProbe('bad', raises=gw_error.Fatal('no index'))
+        ctx = context()
+        core.run_all(ctx, [bad])
+        self.assertEqual(ctx.results['bad'].status, 'error')
+        self.assertIn('no index', ctx.results['bad'].as_dict()['error'])
+
+    def test_a_usb_error_is_caught_too(self):
+        from greaseweazle import usb as gw_usb
+        bad = fake.StubProbe(
+            'bad', raises=gw_usb.CmdError(b'x', gw_usb.Ack.NoIndex))
+        after = fake.StubProbe('after')
+        ctx = context()
+        core.run_all(ctx, [bad, after])
+        self.assertEqual(ctx.results['bad'].status, 'error')
+        self.assertTrue(after.ran)
+
+    def test_a_failure_is_not_a_skip(self):
+        # The profile must tell "this probe broke" from "this probe was not
+        # run", since only one of them is a fault.
+        from greaseweazle import error as gw_error
+        bad = fake.StubProbe('bad', raises=gw_error.Fatal('boom'))
+        ctx = context()
+        core.run_all(ctx, [bad])
+        self.assertNotEqual(ctx.results['bad'].status, 'skipped')
+        self.assertFalse(ctx.results['bad'].ok)
+
+    def test_probes_depending_on_a_failed_one_are_skipped(self):
+        from greaseweazle import error as gw_error
+        bad = fake.StubProbe('bad', raises=gw_error.Fatal('boom'))
+        after = fake.StubProbe('after', depends_on=('bad',))
+        ctx = context()
+        core.run_all(ctx, [bad, after])
+        self.assertFalse(after.ran)
+        self.assertEqual(ctx.results['after'].status, 'skipped')
 
 
 class TestMediaAnnouncements(unittest.TestCase):
@@ -114,6 +186,50 @@ class TestMediaAnnouncements(unittest.TestCase):
         core.run_all(ctx, [fake.StubProbe('w', destructive=True,
                                           needs_media=core.MEDIA_SCRATCH)])
         self.assertEqual(asked, [])
+
+
+class TestWatchdogRecovery(unittest.TestCase):
+    """Anything which waits for a person outlasts the firmware watchdog,
+    which drops every drive after ten seconds of silence."""
+
+    def test_the_drive_is_taken_back_after_a_media_pause(self):
+        taken = []
+        ctx = context(pause=lambda prompt: None,
+                      reselect=lambda: taken.append('reselect'))
+        core.run_all(ctx, [fake.StubProbe('a', needs_media=core.MEDIA_ANY)])
+        self.assertEqual(len(taken), 1)
+
+    def test_the_drive_is_taken_back_after_asking_to_write(self):
+        taken = []
+        ctx = context(confirm=lambda ws: True,
+                      reselect=lambda: taken.append('reselect'))
+        core.run_all(ctx, [fake.StubProbe('w', destructive=True)])
+        self.assertEqual(len(taken), 1)
+
+    def test_it_is_taken_back_even_when_writing_is_declined(self):
+        # Declining still took a person's time, and the probes after it need
+        # the drive.
+        taken = []
+        ctx = context(confirm=lambda ws: False,
+                      reselect=lambda: taken.append('reselect'))
+        core.run_all(ctx, [fake.StubProbe('w', destructive=True)])
+        self.assertEqual(len(taken), 1)
+
+    def test_it_is_taken_back_once_not_per_writing_probe(self):
+        # The question is asked once, so the recovery happens once too.
+        taken = []
+        ctx = context(confirm=lambda ws: True,
+                      reselect=lambda: taken.append('reselect'))
+        core.run_all(ctx, [fake.StubProbe('a', destructive=True),
+                           fake.StubProbe('b', destructive=True)])
+        self.assertEqual(len(taken), 1)
+
+    def test_nothing_is_taken_back_when_nobody_was_asked(self):
+        # A scripted run never waits, so there is nothing to recover from.
+        taken = []
+        ctx = context(pause=None, reselect=lambda: taken.append('reselect'))
+        core.run_all(ctx, [fake.StubProbe('a', needs_media=core.MEDIA_ANY)])
+        self.assertEqual(taken, [])
 
 
 class TestTrk0Acquisition(unittest.TestCase):

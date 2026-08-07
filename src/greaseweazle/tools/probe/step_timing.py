@@ -514,8 +514,14 @@ def measure(usb: USB.Unit) -> Result:
         delays.seek_settle = was_settle
         delays.update()
         usb.seek(cylinder, 0, check_trk0=False)
-        usb.read_track(revs=1)      # discard: cheap insurance, see below
-        reference = _one_revolution(usb)
+        try:
+            usb.read_track(revs=1)  # discard: cheap insurance, see below
+            reference = _one_revolution(usb)
+        except USB.CmdError:
+            # No index, so no track to read: an empty drive, or one whose
+            # media it will not read. The step rate is already measured and
+            # is worth keeping; the settle time simply cannot be.
+            reference = []
         if reference:
             for candidate in settle_candidates(was_settle):
                 settle_trials.append(Trial(candidate, _settle_holds(

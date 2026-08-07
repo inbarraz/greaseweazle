@@ -475,8 +475,10 @@ class TestProbeSelection(unittest.TestCase):
         # something absent. That is a skip, not an error.
         chosen = core.select(probe.PROBES, [max_track_write.name],
                              destructive=True)
+        # max-track is filtered out for wearing the drive; the rest of its
+        # prerequisites still come along, in media order.
         self.assertEqual([p.name for p in chosen],
-                         [trk0.name, max_track_write.name])
+                         [trk0.name, index_sensor.name, max_track_write.name])
 
     def test_a_probe_depending_on_an_unregistered_probe_is_an_error(self):
         class Bogus:
@@ -868,6 +870,35 @@ class TestPin34(unittest.TestCase):
                     '%s needs %s but depends on %s which needs %s'
                     % (p.name, p.needs_media, dependency,
                        by_name[dependency].needs_media))
+
+    def test_all_really_means_all(self):
+        # --all sets both flags; if a future probe is excluded by some third
+        # condition, "run everything" would quietly stop meaning that.
+        chosen = core.select(probe.PROBES, None, destructive=True,
+                             allow_wear=True)
+        self.assertEqual(sorted(p.name for p in chosen),
+                         sorted(p.name for p in probe.PROBES))
+
+    def test_the_plan_covers_every_selected_probe(self):
+        # The plan is what somebody reads before fetching disks, so a probe
+        # missing from it is a disk they will not have to hand.
+        chosen = core.select(probe.PROBES, None, destructive=True,
+                             allow_wear=True)
+        lines = []
+        probe.print_plan_to(chosen, lines.append)
+        text = '\n'.join(lines)
+        for p in chosen:
+            self.assertIn(p.name, text)
+
+    def test_the_plan_asks_for_media_in_increasing_order(self):
+        chosen = core.select(probe.PROBES, None, destructive=True,
+                             allow_wear=True)
+        lines = []
+        probe.print_plan_to(chosen, lines.append)
+        wanted = [core.MEDIA_INSTRUCTIONS[m][:20] for m in core.MEDIA_ORDER]
+        seen = [w for w in wanted
+                if any(w in line for line in lines)]
+        self.assertEqual(seen, wanted)
 
     def test_every_probe_declares_what_media_it_needs(self):
         for p in probe.PROBES:

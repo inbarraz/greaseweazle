@@ -35,8 +35,12 @@ from greaseweazle.tools.probe import core, profile, consent, markers, max_track
 name = 'max-track-write'
 title = 'Max Track (write confirmation)'
 summary = 'Confirm the cylinder limit by writing and reading back markers'
-# Confirms a limit that max-track must first find.
-depends_on = ('trk0-sensor', 'max-track')
+# Confirms a limit that max-track must first find, by writing markers and
+# reading them back -- which needs a disk the drive will read, hence the
+# index sensor too. Without it this ran anyway and failed on a missing index,
+# which reads as a fault in the drive rather than as a probe that was never
+# in a position to measure anything.
+depends_on = ('trk0-sensor', 'max-track', 'index-sensor')
 destructive = True
 needs_motor = True
 needs_media = core.MEDIA_SCRATCH

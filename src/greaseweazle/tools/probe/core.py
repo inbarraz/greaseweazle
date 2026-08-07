@@ -135,18 +135,54 @@ class Skipped(NamedTuple):
         out('  (%s)' % self.reason)
 
 
+class Failed(NamedTuple):
+    """Stands in for a probe which raised.
+
+    A probe meeting something it did not expect must not take the rest of the
+    run with it. Twelve probes over three disk changes is several minutes of
+    somebody's attention, and losing the lot because the ninth met an empty
+    drive would be a poor trade for a shorter traceback. The error is recorded
+    where the result would have been, so the profile shows which probe failed
+    and why.
+    """
+
+    reason: str
+    status: str = 'error'
+
+    @property
+    def ok(self) -> bool:
+        return False
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {'status': self.status, 'error': self.reason}
+
+    def report(self, out: Callable[[str], None]) -> None:
+        out('  FAILED - %s' % self.reason)
+
+
 class Context:
     '''What a probe is given: the drive, the options, and what ran before.'''
 
     def __init__(self, usb: USB.Unit, options: Any,
-                 confirm: Callable[[Probe], bool],
+                 confirm: Callable[[Sequence['Probe']], bool],
                  out: Callable[[str], None] = print,
-                 pause: Optional[Callable[[str], Any]] = None) -> None:
+                 pause: Optional[Callable[[str], Any]] = None,
+                 reselect: Optional[Callable[[], None]] = None) -> None:
         self.usb = usb
         self.options = options
         self._confirm = confirm
         self.report = out
         self._pause = pause
+        # Anything which waits for a person outlasts the firmware watchdog,
+        # which deselects every drive and stops the motors after ten seconds
+        # of silence. Whatever runs next then fails with "no drive unit
+        # selected" -- which is what a real run did, at the very first
+        # prompt, while every scripted test sailed past because the answer
+        # arrived instantly. So the drive is taken back afterwards.
+        self._reselect = reselect
+        # Asked once for the run, then remembered -- including a refusal, so
+        # that declining is not re-litigated probe by probe.
+        self._may_write: Optional[bool] = None
         self.results: Dict[str, Result] = {}
         # Nothing has been asked for yet, so the first probe announces
         # whatever it needs even if that is nothing.
@@ -167,6 +203,7 @@ class Context:
         self.report('*** %s' % MEDIA_INSTRUCTIONS[probe.needs_media])
         if self._pause is not None and not probe.destructive:
             self._pause('    Press Enter when the drive is ready: ')
+            self.reselect()
 
     def record(self, probe: Probe, result: Result) -> None:
         self.results[probe.name] = result
@@ -184,8 +221,17 @@ class Context:
         result = self.results.get(name)
         return result is not None and result.ok
 
-    def confirm(self, probe: Probe) -> bool:
-        return self._confirm(probe)
+    def confirm(self, writers: Sequence[Probe]) -> bool:
+        if self._may_write is None:
+            self._may_write = self._confirm(writers)
+            # Asking took a person's time, and the watchdog does not wait.
+            self.reselect()
+        return self._may_write
+
+    def reselect(self) -> None:
+        '''Take the drive back after the watchdog will have dropped it.'''
+        if self._reselect is not None:
+            self._reselect()
 
     def as_dict(self) -> Dict[str, Any]:
         return dict((name, result.as_dict())
@@ -299,6 +345,8 @@ def needs_motor(probes: Iterable[Probe]) -> bool:
 def run_all(ctx: Context, probes: Sequence[Probe]) -> None:
     '''Run each probe, skipping any whose prerequisites did not hold.'''
 
+    writers = [p for p in probes if p.destructive]
+
     for probe in probes:
         ctx.require_media(probe)
         unmet = [name for name in probe.depends_on if not ctx.ok(name)]
@@ -306,12 +354,18 @@ def run_all(ctx: Context, probes: Sequence[Probe]) -> None:
             result: Result = Skipped(
                 'depends on %s, which did not produce a usable result'
                 % ', '.join(unmet))
-        elif probe.destructive and not ctx.confirm(probe):
+        elif probe.destructive and not ctx.confirm(writers):
             # Consent is enforced here, once, rather than trusted to each
             # destructive probe to remember.
             result = Skipped('not approved')
         else:
-            result = probe.run(ctx)
+            try:
+                result = probe.run(ctx)
+            except (USB.CmdError, error.Fatal) as exception:
+                # Recorded, not raised. The probes which follow may want
+                # nothing this one needed, and the ones already done have
+                # answers worth keeping.
+                result = Failed(str(exception))
 
         ctx.record(probe, result)
         ctx.report('')
