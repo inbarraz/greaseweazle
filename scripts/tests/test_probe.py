@@ -14,7 +14,9 @@ from typing import List, Tuple
 import unittest
 
 from greaseweazle import error
-from greaseweazle.tools.probe import consent, max_track, max_track_write
+from greaseweazle.tools import probe
+from greaseweazle.tools.probe import (
+    consent, max_track, max_track_write, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -76,24 +78,6 @@ class TestInterpret(unittest.TestCase):
         self.assertEqual(result.cylinders, 37)
 
 
-class TestSearchStartsLow(unittest.TestCase):
-    """The outward search must not open near a large drive's cylinder count."""
-
-    def test_starts_below_the_smallest_drive_we_know_of(self):
-        # A 37-cylinder drive must not have its head driven into the stop by
-        # the very first pass, before the search has learned anything.
-        self.assertLess(max_track.START_CYLINDER, 37)
-
-    def test_overshoot_is_bounded_by_one_escalation(self):
-        # Whatever the drive, the head is never driven further past its stop
-        # than a single escalation step.
-        for stop in (36, 39, 43, 79, 83):
-            probe = max_track.START_CYLINDER
-            while probe <= stop:
-                probe += max_track.ESCALATE_STEP
-            self.assertLessEqual(probe - stop, max_track.ESCALATE_STEP,
-                                 'overshot on a %d-cylinder drive' % stop)
-
     def test_drive_reaching_probe_cylinder_is_a_lower_bound(self):
         # The drive got as far as we asked, so we have not found its stop.
         result = max_track.interpret(43, stepback(43, 100))
@@ -125,6 +109,25 @@ class TestSearchStartsLow(unittest.TestCase):
             result = max_track.interpret(43, stepback(43, reachable))
             self.assertEqual(result.max_cylinder, reachable)
             self.assertEqual(result.cylinders, reachable + 1)
+
+
+class TestSearchStartsLow(unittest.TestCase):
+    """The outward search must not open near a large drive's cylinder count."""
+
+    def test_starts_below_the_smallest_drive_we_know_of(self):
+        # A 37-cylinder drive must not have its head driven into the stop by
+        # the very first pass, before the search has learned anything.
+        self.assertLess(max_track.START_CYLINDER, 37)
+
+    def test_overshoot_is_bounded_by_one_escalation(self):
+        # Whatever the drive, the head is never driven further past its stop
+        # than a single escalation step.
+        for stop in (36, 39, 43, 79, 83):
+            cylinder = max_track.START_CYLINDER
+            while cylinder <= stop:
+                cylinder += max_track.ESCALATE_STEP
+            self.assertLessEqual(cylinder - stop, max_track.ESCALATE_STEP,
+                                 'overshot on a %d-cylinder drive' % stop)
 
 
 class TestReconcile(unittest.TestCase):
@@ -306,6 +309,121 @@ class TestMarkerInterpret(unittest.TestCase):
         import json
         result = max_track_write.interpret([(79, 79), (80, 91)])
         json.dumps(result.as_dict())
+
+
+def trk0_walk(walk_to=4, home=True, away=(), returned=True):
+    """Build a /TRK0 walk. 'away' lists cylinders wrongly asserting."""
+    outward = [(0, home)] + [(c, c in away) for c in range(1, walk_to + 1)]
+    homeward = ([(c, c in away) for c in range(walk_to - 1, 0, -1)]
+                + [(0, returned)])
+    return outward, homeward
+
+
+class TestTrk0(unittest.TestCase):
+    """Every fault here is synthetic: a drive with a dead Track 0 sensor is
+    not something that can be sourced on demand, so the readings are built
+    rather than recorded."""
+
+    def test_healthy_sensor(self):
+        result = trk0.interpret(*trk0_walk())
+        self.assertEqual(result.status, trk0.OK)
+        self.assertTrue(result.usable)
+
+    def test_stuck_asserted(self):
+        # Asserted everywhere. This is the fault that would otherwise look
+        # like a head which never moves.
+        result = trk0.interpret(*trk0_walk(away=(1, 2, 3, 4)))
+        self.assertEqual(result.status, trk0.STUCK_ASSERTED)
+        self.assertFalse(result.usable)
+
+    def test_no_signal_at_home(self):
+        result = trk0.interpret(*trk0_walk(home=False))
+        self.assertEqual(result.status, trk0.ABSENT_AT_HOME)
+        self.assertFalse(result.usable)
+
+    def test_never_re_asserts(self):
+        # usb.py documents drives which do not assert /TRK0 stepping inward,
+        # so this direction-dependent fault is real, not hypothetical.
+        result = trk0.interpret(*trk0_walk(returned=False))
+        self.assertEqual(result.status, trk0.NO_REASSERT)
+        self.assertFalse(result.usable)
+
+    def test_intermittent(self):
+        result = trk0.interpret(*trk0_walk(away=(2,)))
+        self.assertEqual(result.status, trk0.INCONSISTENT)
+        self.assertFalse(result.usable)
+
+    def test_only_ok_is_usable(self):
+        # Everything downstream is gated on this, so a new status must not
+        # default to being trusted.
+        for status in (trk0.ABSENT_AT_HOME, trk0.STUCK_ASSERTED,
+                       trk0.NO_REASSERT, trk0.INCONSISTENT):
+            self.assertFalse(trk0.Result(status, '').usable, status)
+        self.assertTrue(trk0.Result(trk0.OK, '').usable)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(trk0.interpret(*trk0_walk()).as_dict())
+
+    def test_rejects_a_walk_that_never_leaves_cylinder_0(self):
+        with self.assertRaises(error.Fatal):
+            trk0.interpret([(0, True)], [(0, True)])
+
+    def test_rejects_a_walk_not_anchored_at_cylinder_0(self):
+        with self.assertRaises(error.Fatal):
+            trk0.interpret([(1, False), (2, False)], [(1, False)])
+
+
+class TestProbeSelection(unittest.TestCase):
+    """--only, and the dependencies it must not let you skip."""
+
+    def test_default_run_excludes_the_destructive_probe(self):
+        chosen = probe.resolve(None, write_test=False)
+        self.assertIn(trk0.name, chosen)
+        self.assertIn(max_track.name, chosen)
+        self.assertNotIn(max_track_write.name, chosen)
+
+    def test_write_test_opts_the_destructive_probe_in(self):
+        self.assertIn(max_track_write.name,
+                      probe.resolve(None, write_test=True))
+
+    def test_selecting_one_probe_runs_only_it(self):
+        self.assertEqual(probe.resolve([trk0.name], False), [trk0.name])
+
+    def test_dependencies_are_pulled_in(self):
+        # max-track measures against /TRK0, so asking for it alone must
+        # still validate the sensor, or the figure is unqualified.
+        chosen = probe.resolve([max_track.name], False)
+        self.assertEqual(chosen, [trk0.name, max_track.name])
+
+    def test_transitive_dependencies_are_pulled_in(self):
+        chosen = probe.resolve([max_track_write.name], False)
+        self.assertEqual(chosen,
+                         [trk0.name, max_track.name, max_track_write.name])
+
+    def test_result_is_always_in_run_order(self):
+        # Declared order, not the order the user happened to type.
+        chosen = probe.resolve([max_track.name, trk0.name], False)
+        self.assertEqual(chosen, [trk0.name, max_track.name])
+
+    def test_unknown_probe_is_rejected(self):
+        with self.assertRaises(error.Fatal):
+            probe.resolve(['no-such-probe'], False)
+
+    def test_every_probe_is_listed_and_summarised(self):
+        # A probe missing from ORDER cannot be selected; one missing from
+        # SUMMARIES breaks --list-probes.
+        for name in (trk0.name, max_track.name, max_track_write.name):
+            self.assertIn(name, probe.ORDER)
+            self.assertIn(name, probe.SUMMARIES)
+
+    def test_dependencies_only_ever_point_backwards(self):
+        # A probe may depend only on ones that run before it, or resolve()
+        # would return an order that cannot be executed.
+        for name, deps in probe.DEPENDS_ON.items():
+            for dep in deps:
+                self.assertLess(probe.ORDER.index(dep), probe.ORDER.index(name),
+                                '%s depends on later probe %s' % (name, dep))
 
 
 class TestConsent(unittest.TestCase):

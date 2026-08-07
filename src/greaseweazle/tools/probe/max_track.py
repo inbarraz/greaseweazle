@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.diag.pinmap import TK0_PIN
+from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'max-track'
 summary = 'Highest cylinder the drive head can reach'
@@ -178,11 +178,6 @@ def interpret(probe_cylinder: int,
         'Stepped back to cylinder 0 without Track 0 ever asserting.')
 
 
-def _trk0(usb: USB.Unit) -> bool:
-    '''/TRK0 is active low: a low pin level means the head is at cylinder 0.'''
-    return not usb.get_pin(TK0_PIN)
-
-
 def _recalibrate(usb: USB.Unit, report: Callable[[str], None]) -> None:
     '''Return the head to cylinder 0 and resync the firmware's position.
 
@@ -202,7 +197,7 @@ def measure(usb: USB.Unit, probe_cylinder: int) -> Result:
     '''Run one outward-then-count-back measurement.'''
 
     usb.seek(0, 0)
-    error.check(_trk0(usb),
+    error.check(trk0_asserted(usb),
                 'Track 0 signal absent at cylinder 0. The max-track probe '
                 'needs a working Track 0 sensor to measure against.')
 
@@ -219,12 +214,12 @@ def measure(usb: USB.Unit, probe_cylinder: int) -> Result:
                     % probe_cylinder)
             raise
 
-        samples = [(probe_cylinder, _trk0(usb))]
+        samples = [(probe_cylinder, trk0_asserted(usb))]
         cyl = probe_cylinder
         while not samples[-1][1] and cyl > 0:
             cyl -= 1
             usb.seek(cyl, 0, check_trk0=False)
-            samples.append((cyl, _trk0(usb)))
+            samples.append((cyl, trk0_asserted(usb)))
 
         return interpret(probe_cylinder, samples)
 

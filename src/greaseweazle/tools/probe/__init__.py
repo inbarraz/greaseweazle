@@ -8,12 +8,36 @@
 description = "Probe drive parameters and feature support."
 
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from greaseweazle import error
 from greaseweazle import usb as USB
 from greaseweazle.tools import util
-from greaseweazle.tools.probe import max_track, max_track_write
+from greaseweazle.tools.probe import max_track, max_track_write, trk0
+
+
+def _report_trk0(result: trk0.Result) -> None:
+    print()
+    print('Track 0 Sensor:')
+    if result.status == trk0.OK:
+        print('  Working.')
+    elif result.status == trk0.ABSENT_AT_HOME:
+        print('  NO SIGNAL at cylinder 0.')
+    elif result.status == trk0.STUCK_ASSERTED:
+        print('  FAULTY - stuck asserted.')
+    elif result.status == trk0.NO_REASSERT:
+        print('  FAULTY - does not re-assert on return.')
+    else:
+        print('  FAULTY - intermittent.')
+    print('  (%s)' % result.detail)
+    if result.outward:
+        print('  Out:  %s' % _trk0_trace(result.outward))
+        print('  Back: %s' % _trk0_trace(result.homeward))
+
+
+def _trk0_trace(samples) -> str:
+    return ' '.join('%d:%s' % (cyl, 'ASSERT' if t else '-')
+                    for cyl, t in samples)
 
 
 def _report_max_track(result: max_track.Result) -> None:
@@ -76,20 +100,87 @@ def _report_max_track_write(result: max_track_write.Result,
                           for c, m in result.readings))
 
 
+# The probes, in the order they must run: an entry may depend on earlier
+# ones, never on later ones. Dependencies are declared rather than implied by
+# the ordering alone, so that selecting a probe on its own still pulls in
+# whatever qualifies its result.
+ORDER = [trk0.name, max_track.name, max_track_write.name]
+
+SUMMARIES = {
+    trk0.name: trk0.summary,
+    max_track.name: max_track.summary,
+    max_track_write.name: max_track_write.summary + ' (writes to the disk)',
+}
+
+DEPENDS_ON = {
+    # Head position is measured against /TRK0, so a max-track figure taken
+    # without validating the sensor would be unqualified.
+    max_track.name: [trk0.name],
+    # The write confirmation checks a limit that max-track must first find.
+    max_track_write.name: [trk0.name, max_track.name],
+}
+
+
+def resolve(only: Optional[List[str]], write_test: bool) -> List[str]:
+    '''Which probes to run, in order. Pure.
+
+    'only' names the probes explicitly asked for, or None for all of them.
+    Prerequisites are added automatically: running a probe without whatever
+    qualifies its result would produce a number nobody should trust.
+    '''
+    if only is None:
+        chosen = set(ORDER)
+        # Destructive probes are opt-in, never part of a plain run.
+        if not write_test:
+            chosen.discard(max_track_write.name)
+    else:
+        unknown = [name for name in only if name not in ORDER]
+        error.check(not unknown,
+                    'Unknown probe(s): %s\nAvailable: %s'
+                    % (', '.join(unknown), ', '.join(ORDER)))
+        chosen = set(only)
+        for name in list(chosen):
+            chosen.update(DEPENDS_ON.get(name, []))
+
+    return [name for name in ORDER if name in chosen]
+
+
 def probe(usb: USB.Unit, args, results: Dict[str, Any]) -> None:
-    """Run the probes and report, collecting results by probe name.
+    """Run the selected probes and report, collecting results by name.
 
     Results are gathered into the caller's dict rather than returned, so
     that they survive a probe raising part-way through. The drive profile
     (a later task) is what will consume them.
     """
 
+    selected = resolve(args.only, args.write_test)
+    if args.only is not None:
+        added = [name for name in selected if name not in args.only]
+        if added:
+            print('Also running %s, which the selection depends on.'
+                  % ', '.join(added))
+
     print('Probing drive (this steps the head repeatedly)...')
+
+    sensor = None
+    if trk0.name in selected:
+        sensor = trk0.run(usb)
+        results[trk0.name] = sensor.as_dict()
+        _report_trk0(sensor)
+        if not sensor.usable:
+            print()
+            print('Skipping the remaining probes: they measure head position')
+            print('against the Track 0 sensor, and it cannot be trusted.')
+            return
+
+    if max_track.name not in selected:
+        return
+
     result = max_track.run(usb, args.max_cylinder)
     results[max_track.name] = result.as_dict()
     _report_max_track(result)
 
-    if not args.write_test:
+    if max_track_write.name not in selected:
         return
     if result.status != max_track.OK or result.max_cylinder is None:
         print()
@@ -127,9 +218,24 @@ must stay in the drive, use --motor-on so the media is turning.''')
                         " markers to the disk (DESTROYS the disk contents)")
     parser.add_argument("--yes", action="store_true",
                         help="approve the write test without prompting")
+    parser.add_argument("--only", action="append", metavar="PROBE",
+                        help="run only this probe (repeatable); probes it"
+                        " depends on are run too")
+    parser.add_argument("--list-probes", action="store_true",
+                        help="list the available probes and exit")
     parser.description = description
     parser.prog += ' ' + argv[1]
     args = parser.parse_args(argv[2:])
+
+    if args.list_probes:
+        for name in ORDER:
+            print('  %-18s%s' % (name, SUMMARIES[name]))
+        return
+
+    # Selecting the write confirmation is itself a request to run it; the
+    # consent prompt, not the flag, is what guards the disk.
+    if args.only is not None and max_track_write.name in args.only:
+        args.write_test = True
 
     # Writing markers needs the media turning, so the write test implies the
     # motor regardless of what was asked for.
