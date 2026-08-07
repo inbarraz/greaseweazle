@@ -74,12 +74,21 @@ def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
 
     print('Probing drive (this steps the head repeatedly)...')
 
+    # --non-interactive DECLINES what it cannot ask about, where --yes
+    # approves it. The two are opposites and the difference matters: a
+    # scripted run which silently wrote to a disk because nobody was there
+    # to object would be the worst of both.
+    if args.non_interactive:
+        confirm = lambda p: False
+    else:
+        confirm = lambda p: consent.confirm(p.title, assume_yes=args.yes)
+
     ctx = core.Context(
-        usb, args,
-        confirm=lambda p: consent.confirm(p.title, assume_yes=args.yes),
-        # Nothing to wait for when the disk is never going to change under
-        # us, which is what --yes says: it is already approved to proceed.
-        pause=None if args.yes else input)
+        usb, args, confirm=confirm,
+        # Nothing to wait for when nobody is going to change the disk: --yes
+        # has already approved proceeding, and --non-interactive says there
+        # is no one to ask.
+        pause=None if (args.yes or args.non_interactive) else input)
     try:
         core.run_all(ctx, selected)
     finally:
@@ -112,6 +121,9 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
                         " (DESTROYS the disk contents)")
     parser.add_argument("--yes", action="store_true",
                         help="approve destructive probes without prompting")
+    parser.add_argument("--non-interactive", action="store_true",
+                        help="never ask anything: skip probes which would"
+                        " need approval, and do not wait for disk changes")
     parser.add_argument("--only", action="append", metavar="PROBE",
                         help="run only this probe (repeatable); probes it"
                         " depends on are run too")
