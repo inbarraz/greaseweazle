@@ -14,7 +14,7 @@ from greaseweazle import usb as USB
 from greaseweazle.tools import util
 from greaseweazle.tools.probe import consent, core
 from greaseweazle.tools.probe import (
-    index_sensor, max_track, max_track_write, trk0)
+    index_sensor, max_track, max_track_write, spin_up, trk0)
 
 # The registry. Adding a probe means writing its module and naming it here:
 # order, dependencies, consent and reporting all come from the module itself,
@@ -26,6 +26,7 @@ PROBES: Sequence[core.Probe] = (
     index_sensor,   # type: ignore[assignment]
     max_track,
     max_track_write,
+    spin_up,
     trk0,
 )
 

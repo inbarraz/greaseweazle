@@ -16,7 +16,7 @@ import unittest
 from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
-    consent, core, index_sensor, max_track, max_track_write, trk0)
+    consent, core, index_sensor, max_track, max_track_write, spin_up, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -547,6 +547,98 @@ class TestIndexSensor(unittest.TestCase):
         import json
         json.dumps(index_sensor.interpret(spin(8)).as_dict())
         json.dumps(index_sensor.interpret([]).as_dict())
+
+
+def runup(first, period=0.1669, revolutions=10, ramp=()):
+    """Index pulse times for a run-up.
+
+    'ramp' gives any slow revolutions before the drive reaches 'period'.
+    An empty ramp is the bench drive, which emits no index until it is
+    already at speed.
+    """
+    times, t = [], first
+    for slow in ramp:
+        times.append(t)
+        t += slow
+    for _ in range(revolutions):
+        times.append(t)
+        t += period
+    return times
+
+
+class TestSpinUp(unittest.TestCase):
+
+    def test_drive_that_delivers_no_index_until_at_speed(self):
+        # The bench drive: first pulse already at the settled period, so no
+        # acceleration is visible and the figure is time-to-index.
+        result = spin_up.interpret(runup(0.75))
+        self.assertEqual(result.status, spin_up.OK)
+        self.assertFalse(result.transient_seen)
+        self.assertAlmostEqual(result.first_pulse, 0.75)
+        self.assertEqual(result.steady_at, result.first_pulse)
+
+    def test_drive_that_shows_the_run_up(self):
+        # A drive which does not gate its index would pulse while still
+        # accelerating, and then the two figures differ.
+        result = spin_up.interpret(runup(0.2, ramp=(0.40, 0.30, 0.22, 0.18)))
+        self.assertEqual(result.status, spin_up.OK)
+        self.assertTrue(result.transient_seen)
+        self.assertAlmostEqual(result.first_pulse, 0.2)
+        self.assertGreater(result.steady_at, result.first_pulse)
+
+    def test_no_pulses_at_all(self):
+        result = spin_up.interpret([])
+        self.assertEqual(result.status, spin_up.NO_PULSES)
+        self.assertFalse(result.ok)
+
+    def test_too_few_revolutions(self):
+        result = spin_up.interpret([0.75, 0.92, 1.09])
+        self.assertEqual(result.status, spin_up.TOO_FEW)
+        self.assertFalse(result.ok)
+
+    def test_speed_that_never_settles(self):
+        # Must time out and report, not hang or invent an answer.
+        wandering = [0.3]
+        for n in range(10):
+            wandering.append(wandering[-1] + 0.16 + 0.02 * (n % 3))
+        result = spin_up.interpret(wandering)
+        self.assertEqual(result.status, spin_up.NEVER_STEADY)
+        self.assertFalse(result.ok)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(spin_up.interpret(runup(0.75)).as_dict())
+        json.dumps(spin_up.interpret([]).as_dict())
+
+
+class TestSpinUpReconcile(unittest.TestCase):
+    """The index hole quantises this measurement by up to a revolution."""
+
+    def test_takes_the_smallest_not_the_mean(self):
+        # Measured across five runs on the bench drive. The readings fall in
+        # two clusters a revolution apart; a mean would sit between them, in
+        # a gap where the drive never actually became ready.
+        readings = [0.9098, 0.9135, 0.9147, 0.7504, 0.7505]
+        best, spread = spin_up.reconcile(readings)
+        self.assertAlmostEqual(best, 0.7504)
+        self.assertAlmostEqual(spread, 0.1643, places=4)
+
+    def test_the_spread_is_about_one_revolution(self):
+        # Not noise: it is where the hole happened to be. Guards the claim
+        # that a comparison tolerance must exceed a whole revolution.
+        _, spread = spin_up.reconcile([0.9098, 0.9135, 0.9147,
+                                       0.7504, 0.7505])
+        self.assertLess(spread, 0.1669)
+        self.assertGreater(spread, 0.1669 * 0.9)
+
+    def test_agreement_reports_zero_spread(self):
+        best, spread = spin_up.reconcile([0.75, 0.75])
+        self.assertEqual(best, 0.75)
+        self.assertEqual(spread, 0.0)
+
+    def test_no_readings_is_an_error(self):
+        with self.assertRaises(error.Fatal):
+            spin_up.reconcile([])
 
 
 class TestConsent(unittest.TestCase):
