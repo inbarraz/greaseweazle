@@ -17,7 +17,7 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, head_count, index_sensor, markers, max_track,
-    max_track_write, spin_up, trk0)
+    max_track_write, pin34, spin_up, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -753,6 +753,78 @@ class TestMarkers(unittest.TestCase):
         self.assertTrue(markers.slots_fit(2))
         self.assertFalse(markers.slots_fit(1000))
         self.assertFalse(markers.slots_fit(0))
+
+
+class TestPin34(unittest.TestCase):
+    """Which of the two meanings pin 34 carries on a given drive."""
+
+    def test_a_step_clearing_the_line_is_disk_change(self):
+        # Measured on the bench drive: 100% asserted before any step, 0%
+        # immediately after one, and still 0% back at cylinder 0.
+        result = pin34.interpret(1.0, 0.0)
+        self.assertEqual(result.status, pin34.DISK_CHANGE)
+        self.assertEqual(result.mode, 'disk-change')
+        self.assertTrue(result.ok)
+
+    def test_a_line_indifferent_to_stepping_is_ready(self):
+        result = pin34.interpret(1.0, 1.0)
+        self.assertEqual(result.status, pin34.READY)
+        self.assertEqual(result.mode, 'ready')
+        self.assertTrue(result.ok)
+
+    def test_clear_throughout_is_not_called_ready(self):
+        # The trap. Stepping did not change the line, which naively reads as
+        # "not a latch, therefore READY" -- and is wrong: with a disk
+        # spinning a READY line would be asserted. It is far more likely a
+        # latch already cleared by earlier stepping, and either way it is
+        # not something to state as fact.
+        result = pin34.interpret(0.0, 0.0)
+        self.assertEqual(result.status, pin34.INDETERMINATE)
+        self.assertIsNone(result.mode)
+        self.assertFalse(result.ok)
+        self.assertIn('reinsert', result.detail)
+
+    def test_stepping_asserting_the_line_fits_neither(self):
+        result = pin34.interpret(0.0, 1.0)
+        self.assertEqual(result.status, pin34.UNEXPECTED)
+        self.assertIsNone(result.mode)
+
+    def test_a_line_that_will_not_hold_a_level(self):
+        for before, after in ((0.5, 0.0), (1.0, 0.4), (0.6, 0.6)):
+            result = pin34.interpret(before, after)
+            self.assertEqual(result.status, pin34.UNSTABLE,
+                             (before, after))
+
+    def test_nearly_steady_readings_still_count_as_levels(self):
+        # Polling over USB will miss the odd sample; that must not be
+        # mistaken for a line changing state.
+        self.assertEqual(pin34.interpret(0.98, 0.02).status,
+                         pin34.DISK_CHANGE)
+
+    def test_fractions_outside_range_are_an_error(self):
+        for before, after in ((-0.1, 0.0), (0.0, 1.5)):
+            with self.assertRaises(error.Fatal):
+                pin34.interpret(before, after)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(pin34.interpret(1.0, 0.0).as_dict())
+        json.dumps(pin34.interpret(0.0, 0.0).as_dict())
+
+    def test_runs_before_anything_that_steps_the_head(self):
+        # Stepping clears a disk-change latch, so a probe which moves the
+        # head first leaves this one nothing to observe and it can only
+        # report indeterminate. The order comes out right today from the
+        # dependency sort; this pins it down so a future stepping probe
+        # cannot quietly sort ahead and cost this one its answer.
+        order = [p.name for p in core.select(probe.PROBES, None,
+                                             destructive=True,
+                                             allow_wear=True)]
+        steps_the_head = (trk0.name, max_track.name, head_count.name,
+                          max_track_write.name)
+        for stepper in steps_the_head:
+            self.assertLess(order.index(pin34.name), order.index(stepper),
+                            '%s steps the head before pin34 runs' % stepper)
 
 
 class TestConsent(unittest.TestCase):
