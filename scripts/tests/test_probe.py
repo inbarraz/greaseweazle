@@ -17,7 +17,8 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, double_step, head_count, index_sensor, markers, max_track,
-    max_track_write, multi_speed, pin34, profile, spin_up, trk0)
+    max_track_write, multi_speed, pin34, profile, spin_up, trk0,
+    write_verify)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -1179,6 +1180,80 @@ class TestDoubleStepComparison(unittest.TestCase):
     def test_sample_pairs_fit_the_smallest_drive(self):
         for _, upper in double_step.SAMPLE_PAIRS:
             self.assertLess(upper, 37)
+
+
+def written_back(*errors):
+    """Blocks whose recovered period is off by the given fractions."""
+    out = []
+    for n, e in enumerate(errors):
+        written = write_verify.PASSES_US[0][n % 6]
+        read = None if e is None else written * (1 + e)
+        out.append(write_verify.Block(n // 6, written, read))
+    return out
+
+
+class TestWriteVerify(unittest.TestCase):
+
+    def test_an_exact_read_back_passes(self):
+        # High-density media in its own drive returned 0.0000% on every
+        # block of three runs: a written period is a whole number of sample
+        # ticks and the median lands back on it.
+        result = write_verify.interpret(written_back(*([0.0] * 12)))
+        self.assertEqual(result.status, write_verify.OK)
+        self.assertTrue(result.ok)
+
+    def test_the_marginal_media_pairing_still_passes(self):
+        # Double-density media in a high-density drive: the worst block was
+        # 0.31% out. That is a drive and media combination people really use
+        # and it must not be reported as a fault.
+        result = write_verify.interpret(
+            written_back(0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                         0.0, 0.0, -0.0031, 0.0, 0.0, 0.0031))
+        self.assertEqual(result.status, write_verify.OK)
+        self.assertLess(result.worst_error, 0.01)
+
+    def test_a_stale_track_from_the_other_pass_fails(self):
+        # The failure the two passes exist to catch: nothing was written, so
+        # a block expecting 4.5us reads whatever the other pass left, a
+        # third out at least.
+        result = write_verify.interpret(written_back(*([0.33] * 12)))
+        self.assertEqual(result.status, write_verify.FAILED)
+        self.assertFalse(result.ok)
+
+    def test_part_of_a_track_arriving_is_its_own_verdict(self):
+        # Worse than writing nothing, since what it produces looks valid.
+        result = write_verify.interpret(
+            written_back(0.0, 0.0, 0.0, 0.5, 0.5, 0.5,
+                         0.0, 0.0, 0.0, 0.5, 0.5, 0.5))
+        self.assertEqual(result.status, write_verify.PARTIAL)
+        self.assertFalse(result.ok)
+
+    def test_a_track_reading_back_as_nothing(self):
+        result = write_verify.interpret(written_back(*([None] * 12)))
+        self.assertEqual(result.status, write_verify.UNREADABLE)
+        self.assertIsNone(result.worst_error)
+
+    def test_the_tolerance_clears_both_measured_extremes(self):
+        # Sixteen times above the worst honest reading, six times below the
+        # mildest dishonest one.
+        self.assertGreater(write_verify.PERIOD_TOLERANCE, 0.0031 * 5)
+        self.assertLess(write_verify.PERIOD_TOLERANCE, 0.33 / 5)
+
+    def test_both_passes_are_rotations_of_each_other(self):
+        # If a block expected the same period in both passes, a stale track
+        # would satisfy both and the whole safeguard would be void.
+        first, second = write_verify.PASSES_US
+        self.assertEqual(sorted(first), sorted(second))
+        for a, b in zip(first, second):
+            self.assertNotEqual(a, b)
+
+    def test_no_blocks_is_an_error(self):
+        with self.assertRaises(error.Fatal):
+            write_verify.interpret([])
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(write_verify.interpret(written_back(*([0.0] * 12))).as_dict())
 
 
 class TestConsent(unittest.TestCase):

@@ -15,7 +15,7 @@ from greaseweazle.tools import util
 from greaseweazle.tools.probe import consent, core, profile
 from greaseweazle.tools.probe import (
     double_step, head_count, index_sensor, max_track, max_track_write,
-    multi_speed, pin34, spin_up, trk0)
+    multi_speed, pin34, spin_up, trk0, write_verify)
 
 # The registry. Adding a probe means writing its module and naming it here:
 # order, dependencies, consent and reporting all come from the module itself,
@@ -35,6 +35,7 @@ PROBES: Sequence[core.Probe] = (
     multi_speed,
     spin_up,
     trk0,
+    write_verify,
 )
 
 
