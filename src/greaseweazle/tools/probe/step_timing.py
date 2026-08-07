@@ -82,7 +82,7 @@ from typing import (Any, Callable, Dict, List, NamedTuple, Optional,
 from greaseweazle import error
 from greaseweazle import usb as USB
 from greaseweazle.tools.delays import Delays
-from greaseweazle.tools.probe import core, double_step, profile
+from greaseweazle.tools.probe import core, fluxcmp, profile
 from greaseweazle.tools.probe.pins import trk0_asserted
 
 name = 'step-timing'
@@ -455,7 +455,7 @@ def _settle_attempt(usb: USB.Unit, delays: Delays, candidate: int,
     delays.update()
     usb.seek(away, 0, check_trk0=False)
     usb.seek(cylinder, 0, check_trk0=False)
-    return (double_step.similarity(reference, _one_revolution(usb))
+    return (fluxcmp.similarity(reference, _one_revolution(usb))
             >= SETTLE_MATCH)
 
 

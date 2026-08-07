@@ -17,8 +17,8 @@ from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
     consent, core, double_step, head_count, index_sensor, markers, max_track,
-    max_track_write, multi_speed, pin34, profile, spin_up, step_timing,
-    trk0, write_verify)
+    fluxcmp, max_track_write, multi_speed, pin34, profile, spin_up,
+    step_timing, trk0, write_verify)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -1090,299 +1090,109 @@ class TestMultiSpeed(unittest.TestCase):
         json.dumps(multi_speed.interpret(None, None).as_dict())
 
 
-def pairs_reading(similarity, variety=0.62):
-    return [double_step.Pair(lo, hi, variety, variety, similarity)
-            for lo, hi in double_step.SAMPLE_PAIRS]
+def headers_at(*pairs):
+    return [double_step.Reading(cyl, tuple(headers)) for cyl, headers in pairs]
 
 
 class TestDoubleStep(unittest.TestCase):
-    """Whether one written track covers two of the drive's cylinders."""
+    """The disk carries the answer: every sector header names the cylinder
+    the formatting drive believed it was writing."""
 
-    def test_adjacent_cylinders_differing_means_no_double_step(self):
-        # Measured on a formatted 360k disk in its own drive: 53.6% to 60.3%
-        # of transitions shared, which is the chance rate rather than any
-        # similarity.
-        for measured in (0.536, 0.584, 0.603):
-            result = double_step.interpret(pairs_reading(measured))
-            self.assertEqual(result.status, double_step.MATCHED, measured)
-            self.assertFalse(result.double_step)
+    def test_headers_naming_their_own_cylinder_means_single_step(self):
+        # Measured on a 360k disk in its own 360k drive.
+        result = double_step.interpret(
+            headers_at((4, [4]), (5, [5]), (8, [8]), (9, [9])))
+        self.assertEqual(result.status, double_step.MATCHED)
+        self.assertFalse(result.double_step)
+        self.assertTrue(result.ok)
 
-    def test_adjacent_cylinders_identical_means_double_step(self):
-        # The same track re-read scored 94.9%; half-pitch media puts the same
-        # track under both cylinders and should score alike.
-        result = double_step.interpret(pairs_reading(0.949))
+    def test_headers_naming_half_their_cylinder_means_double_step(self):
+        # Measured on that same disk in an 80-track drive. Even cylinders sit
+        # over one written track; odd ones straddle two and return headers
+        # from both, which is corroboration nothing else explains.
+        result = double_step.interpret(
+            headers_at((4, [2]), (5, [2, 3]), (8, [4]), (9, [4, 5])))
         self.assertEqual(result.status, double_step.HALF_PITCH)
         self.assertTrue(result.double_step)
+        self.assertTrue(result.ok)
 
-    def test_a_blank_disk_answers_nothing_rather_than_wrongly(self):
-        # THE false positive. Blank media reads as a regular grid, so two
-        # blank tracks match perfectly and a naive comparison calls it
-        # half-pitch. Variety is zero on a grid and 0.62 on real data.
-        blank = [double_step.Pair(lo, hi, 0.0, 0.0, 1.0)
-                 for lo, hi in double_step.SAMPLE_PAIRS]
-        result = double_step.interpret(blank)
-        self.assertEqual(result.status, double_step.NO_DATA)
+    def test_the_straddle_is_recognised_on_its_own(self):
+        self.assertEqual(double_step.Reading(5, (2, 3)).verdict, 'half')
+        self.assertEqual(double_step.Reading(13, (6, 7)).verdict, 'half')
+
+    def test_an_even_cylinder_over_half_pitch_media(self):
+        self.assertEqual(double_step.Reading(12, (6,)).verdict, 'half')
+
+    def test_nothing_decodable_answers_nothing(self):
+        # Unformatted media, or an encoding this does not read -- Amiga,
+        # Commodore and Apple GCR among them. Saying nothing is correct;
+        # guessing would not be.
+        result = double_step.interpret(
+            headers_at((4, []), (5, []), (8, [])))
+        self.assertEqual(result.status, double_step.NO_HEADERS)
         self.assertIsNone(result.double_step)
         self.assertFalse(result.ok)
+        self.assertIn('PC-formatted', result.detail)
 
-    def test_one_blank_track_in_a_pair_disqualifies_the_pair(self):
-        half = [double_step.Pair(4, 5, 0.62, 0.0, 1.0)]
-        self.assertFalse(half[0].comparable)
-        self.assertEqual(double_step.interpret(half).status,
-                         double_step.NO_DATA)
+    def test_one_unreadable_cylinder_does_not_veto_the_others(self):
+        result = double_step.interpret(
+            headers_at((4, []), (5, [5]), (8, [8])))
+        self.assertEqual(result.status, double_step.MATCHED)
 
-    def test_pairs_disagreeing_are_not_forced_to_an_answer(self):
-        mixed = [double_step.Pair(4, 5, 0.62, 0.62, 0.95),
-                 double_step.Pair(8, 9, 0.62, 0.62, 0.56)]
-        result = double_step.interpret(mixed)
+    def test_cylinders_disagreeing_are_not_forced_to_an_answer(self):
+        result = double_step.interpret(headers_at((4, [4]), (8, [4])))
         self.assertEqual(result.status, double_step.UNCLEAR)
         self.assertIsNone(result.double_step)
 
-    def test_a_similarity_between_the_thresholds_is_not_an_answer(self):
-        between = (double_step.SAME_MIN + double_step.DIFFERENT_MAX) / 2
-        self.assertIsNone(double_step.Pair(4, 5, 0.62, 0.62, between).verdict)
+    def test_headers_naming_something_else_entirely(self):
+        # Neither itself nor half itself: a disk written by something this
+        # does not understand, or a misread.
+        self.assertIsNone(double_step.Reading(4, (37,)).verdict)
 
-    def test_data_that_lands_between_thresholds_is_not_called_absent(self):
-        # Distinct from having nothing to compare: there WAS data. Saying
-        # "nothing on the disk" would send someone hunting for a disk fault
-        # that is not there.
-        between = (double_step.SAME_MIN + double_step.DIFFERENT_MAX) / 2
-        result = double_step.interpret(pairs_reading(between))
-        self.assertEqual(result.status, double_step.UNCLEAR)
-        self.assertNotIn('blank', result.detail)
-
-    def test_informative_pairs_carry_a_blank_one(self):
-        mixed = [double_step.Pair(4, 5, 0.0, 0.0, None),
-                 double_step.Pair(8, 9, 0.62, 0.62, 0.56)]
-        self.assertEqual(double_step.interpret(mixed).status,
-                         double_step.MATCHED)
-
-    def test_no_pairs_is_an_error(self):
+    def test_no_cylinders_read_is_an_error(self):
         with self.assertRaises(error.Fatal):
             double_step.interpret([])
 
     def test_result_is_json_shaped(self):
         import json
-        json.dumps(double_step.interpret(pairs_reading(0.56)).as_dict())
+        json.dumps(double_step.interpret(headers_at((4, [2]))).as_dict())
+        json.dumps(double_step.interpret(headers_at((4, []))).as_dict())
+
+    def test_it_reads_both_members_of_each_pair(self):
+        # The odd cylinder is what corroborates half-pitch media, so it is
+        # read rather than assumed.
+        for lower, upper in double_step.SAMPLE_PAIRS:
+            self.assertEqual(lower % 2, 0)
+            self.assertEqual(upper, lower + 1)
+            self.assertLess(upper, 37)
 
 
-class TestDoubleStepComparison(unittest.TestCase):
-    """The comparison itself, on synthetic transition times."""
+class TestFluxComparison(unittest.TestCase):
+    """Kept for the step-timing probe, which asks whether a head that has
+    just moved is reading the track it was sent to."""
 
     def test_variety_separates_blank_from_real_data(self):
-        # Blank media reads as a regular grid of synthesised flux.
         grid = [n * 1.25 for n in range(2000)]
-        self.assertLess(double_step.variety(grid), double_step.VARIETY_MIN)
+        self.assertLess(fluxcmp.variety(grid), fluxcmp.VARIETY_MIN)
         mixed, t = [], 0.0
         for n in range(2000):
             t += (2, 3, 4)[n % 3]
             mixed.append(t)
-        self.assertGreater(double_step.variety(mixed),
-                           double_step.VARIETY_MIN)
+        self.assertGreater(fluxcmp.variety(mixed), fluxcmp.VARIETY_MIN)
 
     def test_variety_of_almost_nothing_is_zero(self):
-        self.assertEqual(double_step.variety([]), 0.0)
-        self.assertEqual(double_step.variety([1.0, 2.0]), 0.0)
+        self.assertEqual(fluxcmp.variety([]), 0.0)
+        self.assertEqual(fluxcmp.variety([1.0, 2.0]), 0.0)
 
     def test_a_track_is_identical_to_itself(self):
         times, t = [], 0.0
         for n in range(20000):
             t += (2, 3, 4)[(n * 7) % 3]
             times.append(t)
-        self.assertGreater(double_step.similarity(times, times),
-                           double_step.SAME_MIN)
-
-    def test_thresholds_clear_the_measured_values(self):
-        # 94.9% for the same track, 53.6% to 60.3% for different ones. The
-        # bar for "different" sits above the chance rate, not near zero:
-        # transitions coincide often by luck at these densities.
-        self.assertLess(double_step.SAME_MIN, 0.949)
-        self.assertGreater(double_step.DIFFERENT_MAX, 0.603)
-        self.assertLess(double_step.DIFFERENT_MAX, double_step.SAME_MIN)
+        self.assertGreater(fluxcmp.similarity(times, times), 0.9)
 
     def test_nothing_compares_to_nothing(self):
-        self.assertEqual(double_step.similarity([], [1.0, 2.0]), 0.0)
-
-    def test_sample_pairs_are_even_aligned(self):
-        # A wide track covers cylinders 2n and 2n+1, so a pair starting on an
-        # odd cylinder straddles two of them and would show a difference on
-        # exactly the media this probe exists to detect.
-        for lower, upper in double_step.SAMPLE_PAIRS:
-            self.assertEqual(lower % 2, 0)
-            self.assertEqual(upper, lower + 1)
-
-    def test_sample_pairs_fit_the_smallest_drive(self):
-        for _, upper in double_step.SAMPLE_PAIRS:
-            self.assertLess(upper, 37)
-
-
-def written_back(*errors):
-    """Blocks whose recovered period is off by the given fractions."""
-    out = []
-    for n, e in enumerate(errors):
-        written = write_verify.PASSES_US[0][n % 6]
-        read = None if e is None else written * (1 + e)
-        out.append(write_verify.Block(n // 6, written, read))
-    return out
-
-
-class TestWriteVerify(unittest.TestCase):
-
-    def test_an_exact_read_back_passes(self):
-        # High-density media in its own drive returned 0.0000% on every
-        # block of three runs: a written period is a whole number of sample
-        # ticks and the median lands back on it.
-        result = write_verify.interpret(written_back(*([0.0] * 12)))
-        self.assertEqual(result.status, write_verify.OK)
-        self.assertTrue(result.ok)
-
-    def test_the_marginal_media_pairing_still_passes(self):
-        # Double-density media in a high-density drive: the worst block was
-        # 0.31% out. That is a drive and media combination people really use
-        # and it must not be reported as a fault.
-        result = write_verify.interpret(
-            written_back(0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                         0.0, 0.0, -0.0031, 0.0, 0.0, 0.0031))
-        self.assertEqual(result.status, write_verify.OK)
-        self.assertLess(result.worst_error, 0.01)
-
-    def test_a_stale_track_from_the_other_pass_fails(self):
-        # The failure the two passes exist to catch: nothing was written, so
-        # a block expecting 4.5us reads whatever the other pass left, a
-        # third out at least.
-        result = write_verify.interpret(written_back(*([0.33] * 12)))
-        self.assertEqual(result.status, write_verify.FAILED)
-        self.assertFalse(result.ok)
-
-    def test_part_of_a_track_arriving_is_its_own_verdict(self):
-        # Worse than writing nothing, since what it produces looks valid.
-        result = write_verify.interpret(
-            written_back(0.0, 0.0, 0.0, 0.5, 0.5, 0.5,
-                         0.0, 0.0, 0.0, 0.5, 0.5, 0.5))
-        self.assertEqual(result.status, write_verify.PARTIAL)
-        self.assertFalse(result.ok)
-
-    def test_a_track_reading_back_as_nothing(self):
-        result = write_verify.interpret(written_back(*([None] * 12)))
-        self.assertEqual(result.status, write_verify.UNREADABLE)
-        self.assertIsNone(result.worst_error)
-
-    def test_the_tolerance_clears_both_measured_extremes(self):
-        # Sixteen times above the worst honest reading, six times below the
-        # mildest dishonest one.
-        self.assertGreater(write_verify.PERIOD_TOLERANCE, 0.0031 * 5)
-        self.assertLess(write_verify.PERIOD_TOLERANCE, 0.33 / 5)
-
-    def test_both_passes_are_rotations_of_each_other(self):
-        # If a block expected the same period in both passes, a stale track
-        # would satisfy both and the whole safeguard would be void.
-        first, second = write_verify.PASSES_US
-        self.assertEqual(sorted(first), sorted(second))
-        for a, b in zip(first, second):
-            self.assertNotEqual(a, b)
-
-    def test_no_blocks_is_an_error(self):
-        with self.assertRaises(error.Fatal):
-            write_verify.interpret([])
-
-    def test_result_is_json_shaped(self):
-        import json
-        json.dumps(write_verify.interpret(written_back(*([0.0] * 12))).as_dict())
-
-
-def trials(*pairs):
-    return [step_timing.Trial(v, ok) for v, ok in pairs]
-
-
-class TestStepTiming(unittest.TestCase):
-    """Results here belong to the drive measured and to nothing else."""
-
-    def test_the_smallest_value_that_held_is_the_answer(self):
-        # Measured on the bench drive: 10000 held, 200 did not, and the
-        # bisection closed on about 1650.
-        got = step_timing.minimum_passing(
-            trials((10000, True), (200, False), (2650, True),
-                   (1425, False), (1654, True)))
-        self.assertEqual(got, 1654)
-
-    def test_nothing_holding_is_no_answer(self):
-        self.assertIsNone(step_timing.minimum_passing(
-            trials((10000, False), (200, False))))
-
-    def test_contradictions_are_caught_rather_than_averaged(self):
-        # More time cannot make stepping worse. A drive which fails at a
-        # generous setting and holds at a tight one has not been measured.
-        found = step_timing.contradictions(
-            trials((5000, False), (1000, True)))
-        self.assertEqual(found, [(1000, 5000)])
-
-    def test_an_orderly_search_contradicts_nothing(self):
-        self.assertEqual(step_timing.contradictions(
-            trials((10000, True), (2650, True), (1425, False))), [])
-
-    def test_both_measured(self):
-        result = step_timing.interpret(
-            trials((10000, True), (1654, True), (1425, False)),
-            trials((15, True), (4, True), (2, False)), 10000, 15)
-        self.assertEqual(result.status, step_timing.OK)
-        self.assertEqual(result.step_us, 1654)
-        self.assertEqual(result.settle_ms, 4)
-        self.assertTrue(result.ok)
-
-    def test_no_settle_requirement_says_so(self):
-        # The bench drive read correctly with no settle delay at all. The
-        # floor must be reported as a finding, not as a number to copy.
-        result = step_timing.interpret(
-            trials((10000, True), (1654, True)),
-            trials((15, True), (step_timing.MIN_SETTLE_MS, True)), 10000, 15)
-        self.assertEqual(result.status, step_timing.OK)
-        self.assertEqual(result.settle_ms, step_timing.MIN_SETTLE_MS)
-        self.assertIn('no settle requirement', result.detail)
-
-    def test_a_drive_with_no_margin_at_its_own_setting(self):
-        result = step_timing.interpret(trials((10000, False)), [])
-        self.assertEqual(result.status, step_timing.NO_MARGIN)
-        self.assertIsNone(result.step_us)
-        self.assertFalse(result.ok)
-
-    def test_erratic_trials_are_refused(self):
-        result = step_timing.interpret(
-            trials((10000, True), (5000, False), (1000, True)), [])
-        self.assertEqual(result.status, step_timing.NO_MARGIN)
-        self.assertIn('contradict', result.detail)
-        self.assertFalse(result.ok)
-
-    def test_step_measured_without_settle(self):
-        result = step_timing.interpret(
-            trials((10000, True), (1654, True)), [], 10000, 15)
-        self.assertEqual(result.status, step_timing.STEP_ONLY)
-        self.assertEqual(result.step_us, 1654)
-        self.assertIsNone(result.settle_ms)
-
-    def test_no_trials_is_an_error(self):
-        with self.assertRaises(error.Fatal):
-            step_timing.interpret([], [])
-
-    def test_the_settle_bar_clears_the_noise_in_a_reread(self):
-        # Two reads of one track shared 89.7% to 97.4% here, so a bar at 85%
-        # failed by luck and reported a settle requirement on a drive with
-        # none. Different tracks share about 56%, which must still fail.
-        self.assertLess(step_timing.SETTLE_MATCH, 0.897)
-        self.assertGreater(step_timing.SETTLE_MATCH, 0.70)
-
-    def test_travel_fits_the_smallest_drive(self):
-        self.assertLess(step_timing.TRAVEL, 37)
-
-    def test_a_candidate_must_hold_more_than_once(self):
-        # A marginal setting passes once by luck, and the whole point is to
-        # find where reliability ends.
-        self.assertGreater(step_timing.ATTEMPTS, 1)
-
-    def test_result_is_json_shaped(self):
-        import json
-        json.dumps(step_timing.interpret(
-            trials((10000, True), (1654, True)),
-            trials((15, True), (0, True)), 10000, 15).as_dict())
+        self.assertEqual(fluxcmp.similarity([], [1.0, 2.0]), 0.0)
 
 
 class TestConsent(unittest.TestCase):

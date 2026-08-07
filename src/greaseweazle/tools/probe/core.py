@@ -53,9 +53,11 @@ MEDIA_INSTRUCTIONS = {
     MEDIA_ANY: 'Load ANY disk the drive can read. Its contents do not '
                'matter, but there must be one: on drives taking the index '
                'from a hole in the media there is no index signal without.',
-    MEDIA_FORMATTED: 'Load a FORMATTED disk with data on it. A blank one '
-                     'reads alike at every cylinder, which answers some '
-                     'questions wrongly rather than not at all.',
+    MEDIA_FORMATTED: 'Load a PC-FORMATTED disk (or any IBM MFM/FM disk: '
+                     'Atari ST, Amstrad, most CP/M). What follows reads the '
+                     'sector headers, which carry the cylinder number the '
+                     'formatting drive wrote -- a blank disk has none, and '
+                     'Amiga, Commodore and Apple GCR are not decoded here.',
     MEDIA_SCRATCH: 'Load a SCRATCH disk. What follows writes to it and '
                    'DESTROYS the contents.',
 }
