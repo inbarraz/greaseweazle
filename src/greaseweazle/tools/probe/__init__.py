@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Sequence
 from greaseweazle import usb as USB
 from greaseweazle.tools import util
 from greaseweazle.tools.probe import consent, core
-from greaseweazle.tools.probe import max_track, max_track_write, trk0
+from greaseweazle.tools.probe import (
+    index_sensor, max_track, max_track_write, trk0)
 
 # The registry. Adding a probe means writing its module and naming it here:
 # order, dependencies, consent and reporting all come from the module itself,
@@ -22,26 +23,21 @@ from greaseweazle.tools.probe import max_track, max_track_write, trk0
 # Listed alphabetically; core.ordered() sorts by declared dependency, so the
 # order here carries no meaning.
 PROBES: Sequence[core.Probe] = (
-    max_track,      # type: ignore[assignment]
+    index_sensor,   # type: ignore[assignment]
+    max_track,
     max_track_write,
     trk0,
 )
 
 
-def probe(usb: USB.Unit, args, results: Dict[str, Any]) -> None:
+def probe(usb: USB.Unit, args, selected: Sequence[core.Probe],
+          results: Dict[str, Any]) -> None:
     """Run the selected probes, collecting results by probe name.
 
     Results are gathered into the caller's dict rather than returned, so that
     they survive a probe raising part-way through. The drive profile (a later
     task) is what will consume them.
     """
-
-    selected = core.select(PROBES, args.only, destructive=args.write_test)
-    if args.only is not None:
-        added = [p.name for p in selected if p.name not in args.only]
-        if added:
-            print('Also running %s, which the selection depends on.'
-                  % ', '.join(added))
 
     print('Probing drive (this steps the head repeatedly)...')
 
@@ -57,9 +53,13 @@ def probe(usb: USB.Unit, args, results: Dict[str, Any]) -> None:
 def main(argv) -> None:
 
     epilog = (util.drive_desc + '''
-Probes measure the drive itself, not a disk. Remove any disk before running:
-repeatedly stepping the head across stationary media can score it. If a disk
-must stay in the drive, use --motor-on so the media is turning.''')
+Probes measure the drive, not a disk, but they differ over whether a disk
+needs to be loaded. Stepping probes want the drive EMPTY: repeatedly dragging
+the head across stationary media can score it. The index probe wants a disk
+LOADED, since on 5.25" and similar drives the index comes from a hole in the
+media and reads as absent without one. Probes needing the spindle turning say
+so, and the motor is switched on for the whole run when any of them is
+selected. Use --list-probes to see what there is, and --only to pick.''')
 
     parser = util.ArgumentParser(usage='%(prog)s [options]', epilog=epilog)
     parser.add_argument("--device", help="device name (COM/serial port)")
@@ -98,14 +98,22 @@ must stay in the drive, use --motor-on so the media is turning.''')
         if any(by_name[n].destructive for n in args.only if n in by_name):
             args.write_test = True
 
-    # Writing needs the media turning, so a destructive run implies the motor
-    # regardless of what was asked for.
-    motor = args.motor_on or args.write_test
+    selected = core.select(PROBES, args.only, destructive=args.write_test)
+    if args.only is not None:
+        added = [p.name for p in selected if p.name not in args.only]
+        if added:
+            print('Also running %s, which the selection depends on.'
+                  % ', '.join(added))
+
+    # Asked of the probes rather than inferred from the flags: a probe which
+    # needs the spindle turning says so, and the motor is switched on for the
+    # whole session because that is the granularity the drive offers.
+    motor = args.motor_on or core.needs_motor(selected)
 
     results: Dict[str, Any] = {}
     try:
         usb = util.usb_open(args.device)
-        util.with_drive_selected(lambda: probe(usb, args, results),
+        util.with_drive_selected(lambda: probe(usb, args, selected, results),
                                  usb, args.drive, motor=motor)
     except USB.CmdError as err:
         print("Command Failed: %s" % err)

@@ -41,6 +41,7 @@ title = 'Track 0 Sensor'
 summary = 'Whether the Track 0 sensor reports position correctly'
 depends_on: Tuple[str, ...] = ()
 destructive = False
+needs_motor = False
 
 # Outcomes.
 OK = 'ok'                          # Asserts at cylinder 0, clears elsewhere.

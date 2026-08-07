@@ -17,6 +17,7 @@
 #     summary      one line, for --list-probes
 #     depends_on   names of probes whose results qualify this one
 #     destructive  True if it writes to the disk
+#     needs_motor  True if it needs the spindle turning
 #     run(ctx)     perform the measurement, returning a Result
 #
 # and its Result satisfies the Result protocol below.
@@ -64,6 +65,7 @@ class Probe(Protocol):
     summary: str
     depends_on: Sequence[str]
     destructive: bool
+    needs_motor: bool
 
     def run(self, ctx: 'Context') -> Result:
         ...
@@ -190,6 +192,15 @@ def select(probes: Sequence[Probe], only: Optional[List[str]],
                     pending.append(dependency)
 
     return ordered([by_name[name] for name in chosen])
+
+
+def needs_motor(probes: Iterable[Probe]) -> bool:
+    '''True if any of these probes needs the spindle turning.
+
+    Asked before the drive is selected, since the motor is switched on for
+    the whole session rather than per probe.
+    '''
+    return any(p.needs_motor for p in probes)
 
 
 def run_all(ctx: Context, probes: Sequence[Probe]) -> None:

@@ -39,6 +39,7 @@ summary = 'Confirm the cylinder limit by writing and reading back markers'
 # Confirms a limit that max-track must first find.
 depends_on = ('trk0-sensor', 'max-track')
 destructive = True
+needs_motor = True
 
 # Outcomes.
 OK = 'ok'                       # Found the stop.

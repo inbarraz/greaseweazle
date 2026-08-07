@@ -16,7 +16,7 @@ import unittest
 from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
-    consent, core, max_track, max_track_write, trk0)
+    consent, core, index_sensor, max_track, max_track_write, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -444,6 +444,106 @@ class TestProbeSelection(unittest.TestCase):
                 self.assertIn(dependency, names,
                               '%s depends on unregistered %s'
                               % (p.name, dependency))
+
+
+def spin(revolutions, period=0.1669, jitter=0.0):
+    """Even index gaps, optionally with a little wobble."""
+    return [period + (jitter if n % 2 else -jitter)
+            for n in range(revolutions)]
+
+
+class TestIndexSensor(unittest.TestCase):
+    """Faults here are synthetic: an intermittent index sensor cannot be
+    ordered on demand, and a healthy drive will not produce one to order."""
+
+    def test_healthy_signal(self):
+        result = index_sensor.interpret(spin(8))
+        self.assertEqual(result.status, index_sensor.OK)
+        self.assertTrue(result.ok)
+
+    def test_reports_measured_speed_without_judging_it(self):
+        # 166.9ms is 359 rpm; 200ms is 300 rpm. Both are healthy, because
+        # nothing here knows what the drive is supposed to do.
+        for period in (0.1669, 0.2, 0.5):
+            result = index_sensor.interpret(spin(8, period=period))
+            self.assertEqual(result.status, index_sensor.OK)
+            self.assertAlmostEqual(result.rpm, 60.0 / period, places=3)
+
+    def test_no_pulses_and_no_flux_means_nothing_readable(self):
+        # Measured: an empty drive and an upside-down disk both return zero
+        # transitions and zero pulses, so this must NOT claim the drive is
+        # empty -- a disk in backwards reads identically. The inverted disk
+        # was observed spinning; the drive gates its read output when it is
+        # not ready, so "no flux" is not evidence of "not turning".
+        result = index_sensor.interpret([], flux_seen=False)
+        self.assertEqual(result.status, index_sensor.NOT_SPINNING)
+        self.assertIsNone(result.period)
+        self.assertFalse(result.ok)
+        self.assertIn('upside-down', result.detail)
+        self.assertNotIn('not spinning', result.detail)
+
+    def test_no_pulses_but_flux_points_at_the_index_hole(self):
+        # Something is turning and being read, so the hole is the problem:
+        # covered over, or a drive with no index sensor at all.
+        result = index_sensor.interpret([], flux_seen=True)
+        self.assertEqual(result.status, index_sensor.NO_INDEX_HOLE)
+        self.assertFalse(result.ok)
+
+    def test_no_pulses_with_media_unknown_stays_vague(self):
+        # Better to say the cause was not established than to guess at one.
+        result = index_sensor.interpret([])
+        self.assertEqual(result.status, index_sensor.ABSENT)
+        self.assertIsNone(result.rpm)
+
+    def test_dropped_pulse_shows_as_a_double_length_gap(self):
+        gaps = spin(8)
+        gaps[3] *= 2
+        result = index_sensor.interpret(gaps)
+        self.assertEqual(result.status, index_sensor.DROPPED)
+        self.assertFalse(result.ok)
+
+    def test_spurious_pulse_shows_as_a_short_gap(self):
+        gaps = spin(8)
+        gaps[3] /= 3
+        result = index_sensor.interpret(gaps)
+        self.assertEqual(result.status, index_sensor.SPURIOUS)
+
+    def test_spurious_beats_dropped_when_both_appear(self):
+        # An extra pulse splits one revolution into a short gap and a long
+        # one, so both signatures show; the extra pulse is the cause.
+        gaps = spin(8)
+        gaps[3], gaps[4] = gaps[3] / 4, gaps[4] * 1.75
+        self.assertEqual(index_sensor.interpret(gaps).status,
+                         index_sensor.SPURIOUS)
+
+    def test_jittery_but_one_per_revolution(self):
+        result = index_sensor.interpret(spin(8, jitter=0.005))
+        self.assertEqual(result.status, index_sensor.JITTERY)
+        self.assertGreater(result.jitter_pct, index_sensor.JITTER_LIMIT_PCT)
+
+    def test_small_wobble_is_still_healthy(self):
+        result = index_sensor.interpret(spin(8, jitter=0.0001))
+        self.assertEqual(result.status, index_sensor.OK)
+
+    def test_too_few_revolutions_to_judge(self):
+        result = index_sensor.interpret(spin(2))
+        self.assertEqual(result.status, index_sensor.TOO_FEW)
+        self.assertFalse(result.ok)
+
+    def test_readings_from_a_real_drive(self):
+        # Eight gaps captured from a 5.25" drive, in ms, after discarding the
+        # partial first revolution of the capture.
+        gaps_ms = [166.911, 166.912, 166.912, 166.908,
+                   166.912, 166.908, 166.908, 166.912]
+        result = index_sensor.interpret([g / 1e3 for g in gaps_ms])
+        self.assertEqual(result.status, index_sensor.OK)
+        self.assertAlmostEqual(result.period * 1e3, 166.911, places=2)
+        self.assertLess(result.jitter_pct, 0.01)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(index_sensor.interpret(spin(8)).as_dict())
+        json.dumps(index_sensor.interpret([]).as_dict())
 
 
 class TestConsent(unittest.TestCase):

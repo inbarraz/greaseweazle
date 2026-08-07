@@ -52,6 +52,7 @@ summary = 'Highest cylinder the drive head can reach'
 # validating that sensor would be unqualified.
 depends_on = ('trk0-sensor',)
 destructive = False
+needs_motor = False
 
 # Probe outcomes.
 OK = 'ok'                    # We measured a limit.
