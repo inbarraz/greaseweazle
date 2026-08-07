@@ -66,6 +66,7 @@ summary = 'How long after motor-on the drive starts delivering index'
 depends_on = ('index-sensor',)
 destructive = False
 needs_motor = True
+wears_drive = False
 
 # Outcomes.
 OK = 'ok'                        # Timed it.

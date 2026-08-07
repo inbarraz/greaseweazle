@@ -123,6 +123,7 @@ summary = 'Whether the index signal is present and steady'
 depends_on: Tuple[str, ...] = ()
 destructive = False
 needs_motor = True
+wears_drive = False
 
 # Outcomes.
 OK = 'ok'                        # One steady pulse per revolution.

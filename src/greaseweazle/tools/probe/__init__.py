@@ -14,7 +14,7 @@ from greaseweazle import usb as USB
 from greaseweazle.tools import util
 from greaseweazle.tools.probe import consent, core
 from greaseweazle.tools.probe import (
-    index_sensor, max_track, max_track_write, spin_up, trk0)
+    head_count, index_sensor, max_track, max_track_write, spin_up, trk0)
 
 # The registry. Adding a probe means writing its module and naming it here:
 # order, dependencies, consent and reporting all come from the module itself,
@@ -23,7 +23,8 @@ from greaseweazle.tools.probe import (
 # Listed alphabetically; core.ordered() sorts by declared dependency, so the
 # order here carries no meaning.
 PROBES: Sequence[core.Probe] = (
-    index_sensor,   # type: ignore[assignment]
+    head_count,     # type: ignore[assignment]
+    index_sensor,
     max_track,
     max_track_write,
     spin_up,
@@ -79,6 +80,8 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
     parser.add_argument("--only", action="append", metavar="PROBE",
                         help="run only this probe (repeatable); probes it"
                         " depends on are run too")
+    parser.add_argument("--allow-wear", action="store_true",
+                        help="also run probes which wear the drive mechanism")
     parser.add_argument("--list-probes", action="store_true",
                         help="list the available probes and exit")
     parser.description = description
@@ -87,9 +90,9 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
 
     if args.list_probes:
         for p in core.ordered(PROBES):
-            print('  %-18s%s%s'
-                  % (p.name, p.summary,
-                     ' (writes to the disk)' if p.destructive else ''))
+            notes = ([' (writes to the disk)'] if p.destructive else [])
+            notes += [' (wears the drive)'] if p.wears_drive else []
+            print('  %-18s%s%s' % (p.name, p.summary, ''.join(notes)))
         return
 
     # Selecting a destructive probe is itself a request to run it; the consent
@@ -99,7 +102,8 @@ selected. Use --list-probes to see what there is, and --only to pick.''')
         if any(by_name[n].destructive for n in args.only if n in by_name):
             args.write_test = True
 
-    selected = core.select(PROBES, args.only, destructive=args.write_test)
+    selected = core.select(PROBES, args.only, destructive=args.write_test,
+                           allow_wear=args.allow_wear)
     if args.only is not None:
         added = [p.name for p in selected if p.name not in args.only]
         if added:

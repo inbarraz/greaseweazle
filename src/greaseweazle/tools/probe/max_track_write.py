@@ -26,12 +26,11 @@
 # DESTRUCTIVE: this erases the window it writes. It runs only behind
 # consent.confirm().
 
-import statistics
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from greaseweazle import error
 from greaseweazle import usb as USB
-from greaseweazle.tools.probe import consent, max_track
+from greaseweazle.tools.probe import consent, markers, max_track
 
 name = 'max-track-write'
 title = 'Max Track (write confirmation)'
@@ -40,6 +39,7 @@ summary = 'Confirm the cylinder limit by writing and reading back markers'
 depends_on = ('trk0-sensor', 'max-track')
 destructive = True
 needs_motor = True
+wears_drive = False
 
 # Outcomes.
 OK = 'ok'                       # Found the stop.
@@ -49,32 +49,15 @@ UNREADABLE = 'unreadable'       # A marker could not be decoded.
 WRPROT = 'write-protected'      # Disk is protected; nothing was measured.
 SKIPPED = 'skipped'             # User declined, or not requested.
 
-# A marker is just a uniform flux period, unique per cylinder, which avoids
-# pulling in any sector codec to write an identifier. The range stays well
-# inside what an ordinary drive can resolve.
-MARKER_BASE_US = 4.0
-MARKER_STEP_US = 0.6
+# Markers come from markers.py, one slot per cylinder in the window. The
+# names below are kept as this probe's own vocabulary, in cylinders rather
+# than slots.
+MARKER_BASE_US = markers.BASE_US
+MARKER_STEP_US = markers.STEP_US
 
-# How far a read-back period may drift and still be accepted. Deliberately
-# well under half a step: a period that lands between two markers belongs to
-# neither, and an unwritten or damaged track must decode to nothing rather
-# than to whichever marker happens to be nearest.
-MARKER_TOLERANCE_US = 0.2
+MARKER_TOLERANCE_US = markers.TOLERANCE_US
 
-# Keep every marker inside a span drives resolve comfortably. Long periods
-# read back short: on the bench drive a track written at 14us came back near
-# 12us, and narrowing the span did not cure it -- 10us still came back near
-# 8.8us, consistently around 12% low. The likely cause is the read channel's
-# gain control manufacturing transitions in the long gaps between real ones,
-# which drags the median interval down.
-#
-# That is survivable, because the test only asks whether a cylinder holds its
-# OWN marker; a misdecoded foreign marker answers that just as well as a
-# correctly decoded one. What would NOT be survivable is a period drifting so
-# far it decodes as nothing at all, since that reads as unreadable media. The
-# span stays narrow to keep that margin, not because it makes the identities
-# accurate. Do not start trusting which marker came back.
-MARKER_MAX_US = 12.0
+MARKER_MAX_US = markers.MAX_US
 
 # How far either side of the suspected stop to write. Below it, enough
 # cylinders to show markers reading back correctly; above it, enough to make
@@ -149,12 +132,12 @@ class Result(NamedTuple):
 
 def marker_us(cylinder: int, lowest: int) -> float:
     '''Flux period that identifies this cylinder. Pure.'''
-    return MARKER_BASE_US + (cylinder - lowest) * MARKER_STEP_US
+    return markers.period_us(cylinder - lowest)
 
 
 def window_fits(lowest: int, highest: int) -> bool:
     '''True if every cylinder in the window gets a well-resolved marker.'''
-    return marker_us(highest, lowest) <= MARKER_MAX_US
+    return markers.slots_fit(highest - lowest + 1)
 
 
 def decode_marker(median_us: float, lowest: int, highest: int) -> Optional[int]:
@@ -163,12 +146,8 @@ def decode_marker(median_us: float, lowest: int, highest: int) -> Optional[int]:
     Returns None if the period matches no marker in the window, which is the
     honest answer for an unwritten or unreadable track.
     '''
-    cylinder = lowest + round((median_us - MARKER_BASE_US) / MARKER_STEP_US)
-    if not lowest <= cylinder <= highest:
-        return None
-    if abs(median_us - marker_us(cylinder, lowest)) > MARKER_TOLERANCE_US:
-        return None
-    return cylinder
+    slot = markers.decode(median_us, highest - lowest + 1)
+    return None if slot is None else lowest + slot
 
 
 def interpret(readings: List[Tuple[int, Optional[int]]]) -> Result:
@@ -211,20 +190,13 @@ def interpret(readings: List[Tuple[int, Optional[int]]]) -> Result:
 
 def _write_marker(usb: USB.Unit, cylinder: int, lowest: int,
                   rev_ticks: float) -> None:
-    period = round(marker_us(cylinder, lowest) * 1e-6 * usb.sample_freq)
-    # Overfill by a margin: the write is cut off at the index pulse, and
-    # coming up short would leave the tail of the previous marker in place.
-    count = int(rev_ticks / period) + 64
-    usb.write_track([period] * count, terminate_at_index=True)
+    markers.write(usb, cylinder - lowest, rev_ticks)
 
 
 def _read_marker(usb: USB.Unit, lowest: int,
                  highest: int) -> Optional[int]:
-    flux = usb.read_track(1)
-    if len(flux.list) < 2:
-        return None
-    median_us = statistics.median(flux.list) / usb.sample_freq * 1e6
-    return decode_marker(median_us, lowest, highest)
+    slot = markers.read(usb, highest - lowest + 1)
+    return None if slot is None else lowest + slot
 
 
 def run(ctx) -> Result:

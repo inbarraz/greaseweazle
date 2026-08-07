@@ -16,7 +16,8 @@ import unittest
 from greaseweazle import error
 from greaseweazle.tools import probe
 from greaseweazle.tools.probe import (
-    consent, core, index_sensor, max_track, max_track_write, spin_up, trk0)
+    consent, core, head_count, index_sensor, markers, max_track,
+    max_track_write, spin_up, trk0)
 
 
 def stepback(probe_cylinder: int, reachable: int) -> List[Tuple[int, bool]]:
@@ -391,11 +392,13 @@ class TestTrk0(unittest.TestCase):
 class TestProbeSelection(unittest.TestCase):
     """--only, and the dependencies it must not let you skip."""
 
-    def test_default_run_excludes_destructive_probes(self):
+    def test_default_run_excludes_destructive_and_wearing_probes(self):
         chosen = [p.name for p in core.select(probe.PROBES, None)]
         self.assertIn(trk0.name, chosen)
-        self.assertIn(max_track.name, chosen)
-        self.assertNotIn(max_track_write.name, chosen)
+        self.assertIn(index_sensor.name, chosen)
+        self.assertNotIn(max_track_write.name, chosen)   # writes
+        self.assertNotIn(head_count.name, chosen)        # writes
+        self.assertNotIn(max_track.name, chosen)         # wears
 
     def test_destructive_flag_opts_them_in(self):
         chosen = [p.name for p in
@@ -412,11 +415,16 @@ class TestProbeSelection(unittest.TestCase):
         chosen = [p.name for p in core.select(probe.PROBES, [max_track.name])]
         self.assertEqual(chosen, [trk0.name, max_track.name])
 
-    def test_transitive_dependencies_are_pulled_in(self):
+    def test_dependencies_are_pulled_in_through_a_chain(self):
+        # spin-up needs the index sensor, which needs nothing; head-count
+        # likewise. Non-wearing prerequisites are added without being asked
+        # for, since a result without them would be unqualified.
         chosen = [p.name for p in
-                  core.select(probe.PROBES, [max_track_write.name])]
-        self.assertEqual(chosen,
-                         [trk0.name, max_track.name, max_track_write.name])
+                  core.select(probe.PROBES, [spin_up.name, head_count.name],
+                              destructive=True)]
+        self.assertEqual(chosen[0], index_sensor.name)
+        self.assertIn(spin_up.name, chosen)
+        self.assertIn(head_count.name, chosen)
 
     def test_result_is_always_in_dependency_order(self):
         # Declared order, not the order the user happened to type.
@@ -436,6 +444,46 @@ class TestProbeSelection(unittest.TestCase):
                          'depends_on', 'destructive', 'run'):
                 self.assertTrue(hasattr(p, attr),
                                 '%s lacks %s' % (p, attr))
+
+    def test_wearing_probes_are_not_run_by_default(self):
+        chosen = [p.name for p in core.select(probe.PROBES, None,
+                                              destructive=True)]
+        self.assertNotIn(max_track.name, chosen)
+
+    def test_a_wearing_probe_is_never_pulled_in_as_a_dependency(self):
+        # max-track-write depends on max-track, which drives the head into
+        # its stop. Selecting the dependent must NOT wear the drive on the
+        # user's behalf; the dependent is skipped instead.
+        chosen = [p.name for p in core.select(probe.PROBES,
+                                              [max_track_write.name],
+                                              destructive=True)]
+        self.assertNotIn(max_track.name, chosen)
+
+    def test_naming_a_wearing_probe_runs_it(self):
+        chosen = [p.name for p in core.select(probe.PROBES, [max_track.name])]
+        self.assertIn(max_track.name, chosen)
+
+    def test_allow_wear_runs_it(self):
+        chosen = [p.name for p in core.select(probe.PROBES, None,
+                                              destructive=True,
+                                              allow_wear=True)]
+        self.assertIn(max_track.name, chosen)
+
+    def test_ordering_tolerates_an_unselected_dependency(self):
+        # Filtering a wearing probe out leaves its dependent referring to
+        # something absent. That is a skip, not an error.
+        chosen = core.select(probe.PROBES, [max_track_write.name],
+                             destructive=True)
+        self.assertEqual([p.name for p in chosen],
+                         [trk0.name, max_track_write.name])
+
+    def test_a_probe_depending_on_an_unregistered_probe_is_an_error(self):
+        class Bogus:
+            name, title, summary = 'bogus', 'Bogus', 'bogus'
+            depends_on = ('nonexistent',)
+            destructive = needs_motor = wears_drive = False
+        with self.assertRaises(error.Fatal):
+            core.select([Bogus()], None)
 
     def test_dependencies_name_registered_probes(self):
         names = set(p.name for p in probe.PROBES)
@@ -639,6 +687,72 @@ class TestSpinUpReconcile(unittest.TestCase):
     def test_no_readings_is_an_error(self):
         with self.assertRaises(error.Fatal):
             spin_up.reconcile([])
+
+
+class TestHeadCount(unittest.TestCase):
+    """Reading cannot answer this, so the verdict comes from what each head
+    reads back after both have been written."""
+
+    def test_each_head_keeps_its_own_marker(self):
+        result = head_count.interpret((0, 1))
+        self.assertEqual(result.status, head_count.DOUBLE)
+        self.assertEqual(result.heads, 2)
+        self.assertTrue(result.ok)
+
+    def test_head_0_carrying_head_1_marker_means_one_head(self):
+        # Both writes landed on the same surface, so side-select does
+        # nothing and there is only one head.
+        result = head_count.interpret((1, 1))
+        self.assertEqual(result.status, head_count.SINGLE)
+        self.assertEqual(result.heads, 1)
+        self.assertTrue(result.ok)
+
+    def test_unreadable_marker_concludes_nothing(self):
+        for readings in ((None, 1), (0, None), (None, None)):
+            result = head_count.interpret(readings)
+            self.assertEqual(result.status, head_count.UNREADABLE, readings)
+            self.assertIsNone(result.heads)
+            self.assertFalse(result.ok)
+
+    def test_wrong_number_of_readings_is_an_error(self):
+        with self.assertRaises(error.Fatal):
+            head_count.interpret((0,))
+
+    def test_is_destructive_so_the_gate_applies(self):
+        # Reading cannot settle head count, so this probe must write -- and
+        # therefore must go through the consent gate like any other.
+        self.assertTrue(head_count.destructive)
+
+    def test_result_is_json_shaped(self):
+        import json
+        json.dumps(head_count.interpret((0, 1)).as_dict())
+        json.dumps(head_count.interpret((None, None)).as_dict())
+
+
+class TestMarkers(unittest.TestCase):
+    """Shared by every probe that needs to tell written tracks apart."""
+
+    def test_round_trip(self):
+        for slot in range(8):
+            self.assertEqual(markers.decode(markers.period_us(slot), 8), slot)
+
+    def test_rejects_a_period_between_two_slots(self):
+        midway = markers.period_us(3) + markers.STEP_US / 2
+        self.assertIsNone(markers.decode(midway, 8))
+
+    def test_rejects_slots_outside_the_range(self):
+        self.assertIsNone(markers.decode(markers.period_us(9), 8))
+        self.assertIsNone(markers.decode(0.5, 8))
+
+    def test_tolerance_leaves_a_real_rejection_band(self):
+        # If tolerance reached half a step every period would decode to
+        # something, and unwritten media would read as a valid marker.
+        self.assertLess(markers.TOLERANCE_US, markers.STEP_US / 2)
+
+    def test_slots_must_fit_the_readable_span(self):
+        self.assertTrue(markers.slots_fit(2))
+        self.assertFalse(markers.slots_fit(1000))
+        self.assertFalse(markers.slots_fit(0))
 
 
 class TestConsent(unittest.TestCase):

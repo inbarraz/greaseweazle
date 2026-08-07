@@ -18,6 +18,7 @@
 #     depends_on   names of probes whose results qualify this one
 #     destructive  True if it writes to the disk
 #     needs_motor  True if it needs the spindle turning
+#     wears_drive  True if running it measurably wears the mechanism
 #     run(ctx)     perform the measurement, returning a Result
 #
 # and its Result satisfies the Result protocol below.
@@ -66,6 +67,7 @@ class Probe(Protocol):
     depends_on: Sequence[str]
     destructive: bool
     needs_motor: bool
+    wears_drive: bool
 
     def run(self, ctx: 'Context') -> Result:
         ...
@@ -136,6 +138,10 @@ def ordered(probes: Iterable[Probe]) -> List[Probe]:
     Sorted from the declarations rather than maintained by hand, so a probe
     cannot be added in the wrong place, and a cycle is reported instead of
     silently producing an order that cannot be run.
+
+    Orders whatever it is given. A dependency outside the set is not an
+    error here: it means that probe was not selected, and run_all will skip
+    whatever needed it, saying so. Registry validity is checked by select().
     '''
     probes = list(probes)
     by_name = dict((p.name, p) for p in probes)
@@ -150,10 +156,8 @@ def ordered(probes: Iterable[Probe]) -> List[Probe]:
                     'Probe dependency cycle involving %s' % probe.name)
         state[probe.name] = 'visiting'
         for dependency in probe.depends_on:
-            error.check(dependency in by_name,
-                        'Probe %s depends on unknown probe %s'
-                        % (probe.name, dependency))
-            visit(by_name[dependency])
+            if dependency in by_name:
+                visit(by_name[dependency])
         state[probe.name] = 'done'
         result.append(probe)
 
@@ -163,16 +167,30 @@ def ordered(probes: Iterable[Probe]) -> List[Probe]:
 
 
 def select(probes: Sequence[Probe], only: Optional[List[str]],
-           destructive: bool = False) -> List[Probe]:
+           destructive: bool = False,
+           allow_wear: bool = False) -> List[Probe]:
     '''Which probes to run, in order.
 
     'only' names the probes explicitly asked for, or None for all of them.
     Prerequisites are added automatically: running a probe without whatever
     qualifies its result would produce a number nobody should trust.
+
+    A probe which wears the mechanism is never added on anyone's behalf --
+    not by a plain run, and not as somebody else's prerequisite. It runs when
+    it is named or when wear is allowed outright, and otherwise whatever
+    depended on it is skipped with the reason given. Pulling a wearing probe
+    in transitively is exactly the surprise this exists to prevent.
     '''
     by_name = dict((p.name, p) for p in probes)
 
+    for probe in probes:
+        for dependency in probe.depends_on:
+            error.check(dependency in by_name,
+                        'Probe %s depends on unknown probe %s'
+                        % (probe.name, dependency))
+
     if only is None:
+        named: Sequence[str] = ()
         chosen = set(p.name for p in probes
                      # Destructive probes are opt-in, never part of a plain
                      # run, however convenient it would be to include them.
@@ -183,6 +201,7 @@ def select(probes: Sequence[Probe], only: Optional[List[str]],
                     'Unknown probe(s): %s\nAvailable: %s'
                     % (', '.join(unknown),
                        ', '.join(p.name for p in probes)))
+        named = only
         chosen = set(only)
         pending = list(chosen)
         while pending:
@@ -190,6 +209,10 @@ def select(probes: Sequence[Probe], only: Optional[List[str]],
                 if dependency not in chosen:
                     chosen.add(dependency)
                     pending.append(dependency)
+
+    if not allow_wear:
+        chosen = set(name for name in chosen
+                     if not by_name[name].wears_drive or name in named)
 
     return ordered([by_name[name] for name in chosen])
 

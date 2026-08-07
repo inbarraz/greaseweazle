@@ -53,6 +53,9 @@ summary = 'Highest cylinder the drive head can reach'
 depends_on = ('trk0-sensor',)
 destructive = False
 needs_motor = False
+# Deliberately drives the head into its outer stop, repeatedly, which is the
+# only way to find where that stop is. Never run on anyone else's behalf.
+wears_drive = True
 
 # Probe outcomes.
 OK = 'ok'                    # We measured a limit.
